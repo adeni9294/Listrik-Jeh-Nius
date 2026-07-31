@@ -1,7 +1,16 @@
-CREATE TYPE monitoring_mode AS ENUM ('BASIC', 'MEDIUM', 'HIGH');
-CREATE TYPE health_status AS ENUM ('EFFICIENT', 'ATTENTION', 'ANOMALY');
+-- 1. Buat ENUM Type secara aman
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'monitoring_mode') THEN
+        CREATE TYPE monitoring_mode AS ENUM ('BASIC', 'MEDIUM', 'HIGH');
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'health_status') THEN
+        CREATE TYPE health_status AS ENUM ('EFFICIENT', 'ATTENTION', 'ANOMALY');
+    END IF;
+END $$;
 
-CREATE TABLE public.profiles (
+-- 2. Buat Tabel Profiles
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
   email TEXT NOT NULL,
   full_name TEXT,
@@ -11,7 +20,8 @@ CREATE TABLE public.profiles (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE public.meters (
+-- 3. Buat Tabel Meters
+CREATE TABLE IF NOT EXISTS public.meters (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   meter_number VARCHAR(50) NOT NULL,
@@ -20,7 +30,8 @@ CREATE TABLE public.meters (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE TABLE public.meter_readings (
+-- 4. Buat Tabel Meter Readings
+CREATE TABLE IF NOT EXISTS public.meter_readings (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
   meter_id UUID REFERENCES public.meters(id) ON DELETE CASCADE NOT NULL,
@@ -35,9 +46,14 @@ CREATE TABLE public.meter_readings (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- RLS Policies
+-- 5. Aktifkan RLS
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.meter_readings ENABLE ROW LEVEL SECURITY;
+
+-- 6. Hapus Policy Lama (jika ada) lalu buat ulang
+DROP POLICY IF EXISTS "Allow individual read access" ON public.profiles;
+DROP POLICY IF EXISTS "Allow individual update access" ON public.profiles;
+DROP POLICY IF EXISTS "Allow individual reading access" ON public.meter_readings;
 
 CREATE POLICY "Allow individual read access" ON public.profiles FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Allow individual update access" ON public.profiles FOR UPDATE USING (auth.uid() = id);
