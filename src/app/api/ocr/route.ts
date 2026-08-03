@@ -26,14 +26,29 @@ export async function POST(req: NextRequest) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    // Menggunakan Gemini 3.6 Flash
-    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+    // Menggunakan model Vision yang stabil & cepat
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3.6-flash',
+      generationConfig: {
+        responseMimeType: 'application/json', // Memaksa output murni berbentuk JSON
+      },
+    });
 
     const prompt = `
-      Analisis foto layar kWh meteran listrik ini. 
-      Ekstrak HANYA angka total kWh yang tertera pada layar digital.
-      Format respon JSON wajib persis seperti ini tanpa teks lain:
-      {"rawText": "1233.6", "cleanValue": 1233.6, "confidence": 95}
+      Analisis foto layar kWh meteran listrik PLN ini. 
+      Ekstrak HANYA angka total kWh yang tertera pada layar digital/analog.
+      
+      Kembalikan JSON dengan struktur persis seperti ini:
+      {
+        "rawText": "1233.6",
+        "cleanValue": 1233.6,
+        "confidence": 95
+      }
+      
+      Catatan:
+      - rawText: Teks asli angka yang terbaca.
+      - cleanValue: Tipe data Float/Number dari angka kWh.
+      - confidence: Estimasi tingkat kepastian pembacaan (0-100).
     `;
 
     const result = await model.generateContent([
@@ -47,8 +62,7 @@ export async function POST(req: NextRequest) {
     ]);
 
     const responseText = result.response.text().trim();
-    const jsonString = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsedData = JSON.parse(jsonString);
+    const parsedData = JSON.parse(responseText);
 
     return NextResponse.json(parsedData);
   } catch (error: any) {
