@@ -1,12 +1,18 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Camera, RefreshCw, Edit3, Check } from 'lucide-react';
+import { Camera, RefreshCw, Edit3, Check, Store } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
 import { createClient } from '@/lib/supabase/client';
+
+interface Meter {
+  id: string;
+  store_name: string;
+  meter_number: string;
+}
 
 export default function ScanPage() {
   const router = useRouter();
@@ -17,9 +23,39 @@ export default function ScanPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
+  // State untuk Toko / Meteran
+  const [meters, setMeters] = useState<Meter[]>([]);
+  const [selectedMeterId, setSelectedMeterId] = useState<string>('');
+  const [isLoadingMeters, setIsLoadingMeters] = useState<boolean>(true);
+
   // State untuk Edit Manual
   const [isEditing, setIsEditing] = useState(false);
   const [manualValue, setManualValue] = useState<string>('');
+
+  // 1. Ambil Daftar Toko Milik User Saat Halaman Dimuat
+  useEffect(() => {
+    const fetchMeters = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('meters')
+          .select('id, store_name, meter_number')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          setMeters(data);
+          setSelectedMeterId(data[0].id); // Set toko pertama sebagai default
+        }
+      } catch (err: any) {
+        console.error('Gagal mengambil data toko:', err.message);
+      } finally {
+        setIsLoadingMeters(false);
+      }
+    };
+
+    fetchMeters();
+  }, [supabase]);
 
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -34,17 +70,20 @@ export default function ScanPage() {
       const compressedBlob = await processAndCompressImage(file);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir Asli dari Supabase
+      // 2. Ambil Bacaan Terakhir Asli dari Toko yang Dipilih
       let lastReadingValue = 0;
-      const { data: lastReading } = await supabase
-        .from('meter_readings')
-        .select('kwh')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      if (selectedMeterId) {
+        const { data: lastReading } = await supabase
+          .from('meter_readings')
+          .select('kwh')
+          .eq('meter_id', selectedMeterId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (lastReading) {
-        lastReadingValue = lastReading.kwh;
+        if (lastReading) {
+          lastReadingValue = lastReading.kwh;
+        }
       }
 
       // 3. Jalankan OCR via Gemini API Route
@@ -81,51 +120,86 @@ export default function ScanPage() {
   };
 
   // Simpan Data ke Supabase
-const handleSave = async () => {
-  if (!validationResult) return;
+  const handleSave = async () => {
+    if (!validationResult) return;
 
-  const finalKwh = parseFloat(manualValue);
-  if (isNaN(finalKwh) || finalKwh <= 0) {
-    alert('Masukkan angka kWh yang valid.');
-    return;
-  }
-
-  setIsSaving(true);
-  try {
-    // Cek apakah ada user yang sedang login
-    const { data: { user } } = await supabase.auth.getUser();
-
-    // Buat payload data yang akan disimpan
-    const payload: Record<string, any> = {
-      kwh: finalKwh,
-      confidence: isEditing ? 100 : validationResult.confidence,
-      created_at: new Date().toISOString(),
-    };
-
-    // Hanya masukkan user_id jika user memang sedang login
-    if (user?.id) {
-      payload.user_id = user.id;
+    if (!selectedMeterId && meters.length > 0) {
+      alert('Pilih toko terlebih dahulu!');
+      return;
     }
 
-    const { error } = await supabase.from('meter_readings').insert([payload]);
+    const finalKwh = parseFloat(manualValue);
+    if (isNaN(finalKwh) || finalKwh <= 0) {
+      alert('Masukkan angka kWh yang valid.');
+      return;
+    }
 
-    if (error) throw error;
+    setIsSaving(true);
+    try {
+      // Cek user login
+      const { data: { user } } = await supabase.auth.getUser();
 
-    alert('Berhasil menyimpan data meteran!');
-    router.push('/');
-    router.refresh();
-  } catch (err: any) {
-    console.error('Gagal menyimpan ke Supabase:', err);
-    alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
-  } finally {
-    setIsSaving(false);
-  }
-};
+      const payload: Record<string, any> = {
+        kwh: finalKwh,
+        confidence: isEditing ? 100 : validationResult.confidence,
+        created_at: new Date().toISOString(),
+      };
+
+      // Sisipkan meter_id & user_id jika tersedia
+      if (selectedMeterId) payload.meter_id = selectedMeterId;
+      if (user?.id) payload.user_id = user.id;
+
+      const { error } = await supabase.from('meter_readings').insert([payload]);
+
+      if (error) throw error;
+
+      alert('Berhasil menyimpan data pemakaian listrik toko!');
+      router.push('/');
+      router.refresh();
+    } catch (err: any) {
+      console.error('Gagal menyimpan ke Supabase:', err);
+      alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
       <h1 className="text-xl font-bold text-slate-800">Pindai Meter Listrik</h1>
-      <p className="text-xs text-slate-500">Ambil foto layar angka meteran PLN Anda dengan jelas.</p>
+      <p className="text-xs text-slate-500">Ambil foto layar angka meteran PLN toko Anda dengan jelas.</p>
+
+      {/* Selector Toko / Meteran */}
+      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+        <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+          <Store className="w-4 h-4 text-teal-600" /> Pilih Toko / Lokasi Meteran:
+        </label>
+        {isLoadingMeters ? (
+          <div className="text-xs text-slate-400 py-1">Memuat daftar toko...</div>
+        ) : meters.length > 0 ? (
+          <select
+            value={selectedMeterId}
+            onChange={(e) => setSelectedMeterId(e.target.value)}
+            className="w-full text-sm bg-white p-2.5 border rounded-lg focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+          >
+            {meters.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.store_name} — ({m.meter_number})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+            Belum ada toko terdaftar.{' '}
+            <button
+              onClick={() => router.push('/toko/tambah')}
+              className="underline font-bold text-amber-800"
+            >
+              Tambah Toko Sekarang
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Camera View / Preview Container */}
       <div className="relative w-full h-72 bg-slate-900 rounded-2xl overflow-hidden flex flex-col items-center justify-center border-2 border-dashed border-slate-300">
@@ -134,7 +208,7 @@ const handleSave = async () => {
         ) : (
           <div className="text-center p-6 text-slate-400 space-y-2">
             <Camera className="w-12 h-12 mx-auto stroke-1" />
-            <p className="text-xs">Arahkan kamera ke layar kwh meteran</p>
+            <p className="text-xs">Arahkan kamera ke layar kWh meteran toko</p>
           </div>
         )}
 
