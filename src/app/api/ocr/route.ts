@@ -25,9 +25,9 @@ export async function POST(req: NextRequest) {
     const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // Gunakan 'gemini-1.5-flash' (Model Multimodal Cepat & Resmi)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    // Menggunakan Gemini 3.6 Flash
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
     const prompt = `
       Analisis foto layar kWh meteran listrik ini. 
