@@ -24,17 +24,14 @@ export default function TambahTokoPage() {
     setErrorMessage(null);
 
     try {
-      // 1. Cek User Authenticated
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
-      if (authError || !user) {
-        throw new Error('Sesi Anda telah berakhir. Silakan login terlebih dahulu.');
-      }
+      // 1. Cek User Authenticated (Gunakan Dummy ID jika belum login)
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id || '00000000-0000-0000-0000-000000000000';
 
       // 2. Insert Toko / Meteran Baru ke Tabel `meters`
       const { error: insertError } = await supabase.from('meters').insert([
         {
-          user_id: user.id,
+          user_id: userId,
           store_name: storeName,
           meter_number: meterNumber,
           power_va: parseInt(powerVa),
