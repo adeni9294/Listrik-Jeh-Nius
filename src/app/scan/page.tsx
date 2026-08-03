@@ -5,9 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Camera, RefreshCw } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
-import { TesseractOCREngine } from '@/lib/ocr/tesseract-adapter';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
-import { createClient } from '@/lib/supabase/client'; // Import client Supabase kamu
+import { createClient } from '@/lib/supabase/client';
 
 export default function ScanPage() {
   const router = useRouter();
@@ -32,7 +31,7 @@ export default function ScanPage() {
       setImageBlob(compressedBlob);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir Asli dari Supabase (Opsional/Fallback)
+      // 2. Ambil Bacaan Terakhir Asli dari Supabase
       let lastReadingValue = 0;
       const { data: lastReading } = await supabase
         .from('meter_readings')
@@ -45,11 +44,23 @@ export default function ScanPage() {
         lastReadingValue = lastReading.kwh;
       }
 
-      // 3. Jalankan OCR Tesseract.js
-      const ocrEngine = new TesseractOCREngine();
-      const ocrData = await ocrEngine.processImage(compressedBlob);
+      // 3. Jalankan OCR menggunakan Gemini 2.5 Flash (via API Route) ⚡
+      const formData = new FormData();
+      formData.append('image', compressedBlob);
 
-      // 4. Jalankan AI Validation Engine
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Gagal melakukan OCR dengan Gemini');
+      }
+
+      const ocrData = await res.json();
+
+      // 4. Jalankan AI Validation Engine Bawaan
       const validated = AIValidationEngine.validate(
         ocrData.rawText,
         ocrData.confidence,
@@ -57,9 +68,9 @@ export default function ScanPage() {
       );
 
       setValidationResult(validated);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Proses OCR Gagal:', err);
-      alert('Gagal membaca gambar. Silakan coba foto ulang.');
+      alert(`Gagal membaca gambar: ${err.message || 'Silakan coba foto ulang.'}`);
     } finally {
       setIsProcessing(false);
     }
@@ -82,7 +93,7 @@ export default function ScanPage() {
       if (error) throw error;
 
       alert('Berhasil menyimpan data meteran!');
-      router.push('/'); // Kembali ke halaman utama/dashboard
+      router.push('/');
       router.refresh();
     } catch (err: any) {
       console.error('Gagal menyimpan ke Supabase:', err);
@@ -111,7 +122,7 @@ export default function ScanPage() {
         {isProcessing && (
           <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center text-white space-y-3">
             <RefreshCw className="w-8 h-8 animate-spin text-teal-400" />
-            <span className="text-xs font-semibold">AI sedang membaca & memvalidasi angka...</span>
+            <span className="text-xs font-semibold">Gemini AI sedang membaca & memvalidasi angka...</span>
           </div>
         )}
       </div>
@@ -136,7 +147,7 @@ export default function ScanPage() {
       {validationResult && (
         <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex justify-between items-center border-b pb-2">
-            <span className="text-xs font-semibold text-slate-500">Hasil Pembacaan AI</span>
+            <span className="text-xs font-semibold text-slate-500">Hasil Pembacaan Gemini AI</span>
             <span
               className={`text-xs px-2 py-0.5 rounded font-bold ${
                 validationResult.confidence > 70
