@@ -12,13 +12,12 @@ export default function ScanPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
-  // ✏️ State Baru untuk Edit Manual
+  // State untuk Edit Manual
   const [isEditing, setIsEditing] = useState(false);
   const [manualValue, setManualValue] = useState<string>('');
 
@@ -31,12 +30,11 @@ export default function ScanPage() {
     setIsEditing(false);
 
     try {
-      // 1. Compress Gambar
+      // 1. Resize & Compress Gambar
       const compressedBlob = await processAndCompressImage(file);
-      setImageBlob(compressedBlob);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir
+      // 2. Ambil Bacaan Terakhir Asli dari Supabase
       let lastReadingValue = 0;
       const { data: lastReading } = await supabase
         .from('meter_readings')
@@ -49,25 +47,14 @@ export default function ScanPage() {
         lastReadingValue = lastReading.kwh;
       }
 
-      // 3. OCR via Gemini 2.5 Flash API Route
+      // 3. Jalankan OCR via Gemini API Route
       const formData = new FormData();
       formData.append('image', compressedBlob);
 
-// Jalankan OCR via API Route
-const res = await fetch('/api/ocr', {
-  method: 'POST',
-  body: formData,
-});
-
-// 🛠️ Proteksi jika API mengembalikan HTML (Error Page)
-const contentType = res.headers.get('content-type');
-if (!contentType || !contentType.includes('application/json')) {
-  const textError = await res.text();
-  console.error('Server mengembalikan HTML/Error bukan JSON:', textError);
-  throw new Error(`Server Error (${res.status}): Route API tidak ditemukan atau crash.`);
-}
-
-const ocrData = await res.json();
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        body: formData,
+      });
 
       if (!res.ok) {
         const errorData = await res.json();
@@ -76,7 +63,7 @@ const ocrData = await res.json();
 
       const ocrData = await res.json();
 
-      // 4. Validasi AI
+      // 4. Jalankan AI Validation Engine
       const validated = AIValidationEngine.validate(
         ocrData.rawText,
         ocrData.confidence,
@@ -93,7 +80,7 @@ const ocrData = await res.json();
     }
   };
 
-  // 🚀 FUNGSI PENYIMPANAN KE SUPABASE
+  // Simpan Data ke Supabase
   const handleSave = async () => {
     if (!validationResult) return;
 
@@ -108,7 +95,6 @@ const ocrData = await res.json();
       const { error } = await supabase.from('meter_readings').insert([
         {
           kwh: finalKwh,
-          // Jika diubah manual oleh pengguna, tandai confidence atau simpan catatan
           confidence: isEditing ? 100 : validationResult.confidence,
           created_at: new Date().toISOString(),
         },
@@ -226,7 +212,6 @@ const ocrData = await res.json();
             </div>
           )}
 
-          {/* Tombol Simpan */}
           <Button
             onClick={handleSave}
             disabled={isSaving}
