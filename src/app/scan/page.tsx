@@ -1,16 +1,22 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Camera, RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Camera, RefreshCw } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { TesseractOCREngine } from '@/lib/ocr/tesseract-adapter';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
+import { createClient } from '@/lib/supabase/client'; // Import client Supabase kamu
 
 export default function ScanPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
   const [imageBlob, setImageBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -21,28 +27,68 @@ export default function ScanPage() {
     setValidationResult(null);
 
     try {
-      // 1. Resize & Compress Gambar ke format WebP
+      // 1. Resize & Compress Gambar
       const compressedBlob = await processAndCompressImage(file);
       setImageBlob(compressedBlob);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Jalankan OCR Tesseract.js
+      // 2. Ambil Bacaan Terakhir Asli dari Supabase (Opsional/Fallback)
+      let lastReadingValue = 0;
+      const { data: lastReading } = await supabase
+        .from('meter_readings')
+        .select('kwh')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastReading) {
+        lastReadingValue = lastReading.kwh;
+      }
+
+      // 3. Jalankan OCR Tesseract.js
       const ocrEngine = new TesseractOCREngine();
       const ocrData = await ocrEngine.processImage(compressedBlob);
 
-      // 3. Jalankan AI Validation Engine
-      const lastKnownReading = 15420.5; // Contoh histori terakhir
+      // 4. Jalankan AI Validation Engine
       const validated = AIValidationEngine.validate(
         ocrData.rawText,
         ocrData.confidence,
-        lastKnownReading
+        lastReadingValue
       );
 
       setValidationResult(validated);
     } catch (err) {
       console.error('Proses OCR Gagal:', err);
+      alert('Gagal membaca gambar. Silakan coba foto ulang.');
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // 🚀 FUNGSI PENYIMPANAN KE SUPABASE
+  const handleSave = async () => {
+    if (!validationResult) return;
+
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.from('meter_readings').insert([
+        {
+          kwh: validationResult.validatedValue,
+          confidence: validationResult.confidence,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
+      if (error) throw error;
+
+      alert('Berhasil menyimpan data meteran!');
+      router.push('/'); // Kembali ke halaman utama/dashboard
+      router.refresh();
+    } catch (err: any) {
+      console.error('Gagal menyimpan ke Supabase:', err);
+      alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -91,16 +137,21 @@ export default function ScanPage() {
         <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex justify-between items-center border-b pb-2">
             <span className="text-xs font-semibold text-slate-500">Hasil Pembacaan AI</span>
-            <span className={`text-xs px-2 py-0.5 rounded font-bold ${
-              validationResult.confidence > 70 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-            }`}>
+            <span
+              className={`text-xs px-2 py-0.5 rounded font-bold ${
+                validationResult.confidence > 70
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-amber-100 text-amber-800'
+              }`}
+            >
               Confidence: {validationResult.confidence.toFixed(0)}%
             </span>
           </div>
 
           <div className="text-center py-2">
             <div className="text-3xl font-extrabold text-slate-900">
-              {validationResult.validatedValue.toFixed(1)} <span className="text-sm font-normal text-slate-500">kWh</span>
+              {validationResult.validatedValue.toFixed(1)}{' '}
+              <span className="text-sm font-normal text-slate-500">kWh</span>
             </div>
           </div>
 
@@ -115,8 +166,19 @@ export default function ScanPage() {
             </div>
           )}
 
-          <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl">
-            Konfirmasi & Simpan
+          {/* Tombol Simpan Terhubung */}
+          <Button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl flex justify-center items-center gap-2"
+          >
+            {isSaving ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" /> Menyimpan...
+              </>
+            ) : (
+              'Konfirmasi & Simpan'
+            )}
           </Button>
         </div>
       )}
