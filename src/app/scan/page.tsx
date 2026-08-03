@@ -81,37 +81,43 @@ export default function ScanPage() {
   };
 
   // Simpan Data ke Supabase
-  const handleSave = async () => {
-    if (!validationResult) return;
+ // Simpan Data ke Supabase
+const handleSave = async () => {
+  if (!validationResult) return;
 
-    const finalKwh = parseFloat(manualValue);
-    if (isNaN(finalKwh) || finalKwh <= 0) {
-      alert('Masukkan angka kWh yang valid.');
-      return;
-    }
+  const finalKwh = parseFloat(manualValue);
+  if (isNaN(finalKwh) || finalKwh <= 0) {
+    alert('Masukkan angka kWh yang valid.');
+    return;
+  }
 
-    setIsSaving(true);
-    try {
-      const { error } = await supabase.from('meter_readings').insert([
-        {
-          kwh: finalKwh,
-          confidence: isEditing ? 100 : validationResult.confidence,
-          created_at: new Date().toISOString(),
-        },
-      ]);
+  setIsSaving(true);
+  try {
+    // 1. Ambil session user yang sedang login
+    const { data: { user } } = await supabase.auth.getUser();
 
-      if (error) throw error;
+    // 2. Insert data beserta user_id
+    const { error } = await supabase.from('meter_readings').insert([
+      {
+        user_id: user ? user.id : null, // Mengirimkan ID user
+        kwh: finalKwh,
+        confidence: isEditing ? 100 : validationResult.confidence,
+        created_at: new Date().toISOString(),
+      },
+    ]);
 
-      alert('Berhasil menyimpan data meteran!');
-      router.push('/');
-      router.refresh();
-    } catch (err: any) {
-      console.error('Gagal menyimpan ke Supabase:', err);
-      alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+    if (error) throw error;
+
+    alert('Berhasil menyimpan data meteran!');
+    router.push('/');
+    router.refresh();
+  } catch (err: any) {
+    console.error('Gagal menyimpan ke Supabase:', err);
+    alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
