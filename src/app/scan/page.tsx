@@ -81,7 +81,6 @@ export default function ScanPage() {
   };
 
   // Simpan Data ke Supabase
- // Simpan Data ke Supabase
 const handleSave = async () => {
   if (!validationResult) return;
 
@@ -93,18 +92,22 @@ const handleSave = async () => {
 
   setIsSaving(true);
   try {
-    // 1. Ambil session user yang sedang login
+    // Cek apakah ada user yang sedang login
     const { data: { user } } = await supabase.auth.getUser();
 
-    // 2. Insert data beserta user_id
-    const { error } = await supabase.from('meter_readings').insert([
-      {
-        user_id: user ? user.id : null, // Mengirimkan ID user
-        kwh: finalKwh,
-        confidence: isEditing ? 100 : validationResult.confidence,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    // Buat payload data yang akan disimpan
+    const payload: Record<string, any> = {
+      kwh: finalKwh,
+      confidence: isEditing ? 100 : validationResult.confidence,
+      created_at: new Date().toISOString(),
+    };
+
+    // Hanya masukkan user_id jika user memang sedang login
+    if (user?.id) {
+      payload.user_id = user.id;
+    }
+
+    const { error } = await supabase.from('meter_readings').insert([payload]);
 
     if (error) throw error;
 
