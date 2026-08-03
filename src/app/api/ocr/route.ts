@@ -25,13 +25,15 @@ export async function POST(req: NextRequest) {
     const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    
+    // Gunakan 'gemini-1.5-flash' (Model Multimodal Cepat & Resmi)
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
       Analisis foto layar kWh meteran listrik ini. 
       Ekstrak HANYA angka total kWh yang tertera pada layar digital.
       Format respon JSON wajib persis seperti ini tanpa teks lain:
-      {"rawText": "15420.5", "cleanValue": 15420.5, "confidence": 95}
+      {"rawText": "1233.6", "cleanValue": 1233.6, "confidence": 95}
     `;
 
     const result = await model.generateContent([
