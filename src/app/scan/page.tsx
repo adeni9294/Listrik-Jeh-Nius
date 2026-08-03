@@ -53,10 +53,21 @@ export default function ScanPage() {
       const formData = new FormData();
       formData.append('image', compressedBlob);
 
-      const res = await fetch('/api/ocr', {
-        method: 'POST',
-        body: formData,
-      });
+// Jalankan OCR via API Route
+const res = await fetch('/api/ocr', {
+  method: 'POST',
+  body: formData,
+});
+
+// 🛠️ Proteksi jika API mengembalikan HTML (Error Page)
+const contentType = res.headers.get('content-type');
+if (!contentType || !contentType.includes('application/json')) {
+  const textError = await res.text();
+  console.error('Server mengembalikan HTML/Error bukan JSON:', textError);
+  throw new Error(`Server Error (${res.status}): Route API tidak ditemukan atau crash.`);
+}
+
+const ocrData = await res.json();
 
       if (!res.ok) {
         const errorData = await res.json();
