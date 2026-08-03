@@ -18,13 +18,13 @@ export default function TambahTokoPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
-      // 1. Cek User Authenticated (Gunakan Dummy ID jika belum login)
+      // 1. Cek User Authenticated (Fallback ke Dummy ID)
       const { data: { user } } = await supabase.auth.getUser();
       const userId = user?.id || '00000000-0000-0000-0000-000000000000';
 
@@ -32,7 +32,7 @@ export default function TambahTokoPage() {
       const { error: insertError } = await supabase.from('meters').insert([
         {
           user_id: userId,
-          store_name: storeName,
+          name: storeName, // Kunci kolom disesuaikan ke 'name'
           meter_number: meterNumber,
           power_va: parseInt(powerVa),
         },
