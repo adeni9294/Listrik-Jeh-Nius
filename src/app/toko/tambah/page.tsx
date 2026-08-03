@@ -18,34 +18,37 @@ export default function TambahTokoPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setErrorMessage(null);
 
     try {
       // 1. Cek User Authenticated (Fallback ke Dummy ID)
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || '00000000-0000-0000-0000-000000000000';
+      const { data, error: userErr } = await supabase.auth.getUser();
+      if (userErr) console.warn('Supabase getUser error:', userErr);
+      const userId = data?.user?.id ?? '00000000-0000-0000-0000-000000000000';
 
       // 2. Insert Toko / Meteran Baru ke Tabel `meters`
-      const { error: insertError } = await supabase.from('meters').insert([
-        {
-          user_id: userId,
-          name: storeName, // Kunci kolom disesuaikan ke 'name'
-          meter_number: meterNumber,
-          power_va: parseInt(powerVa),
-        },
-      ]);
+      const { data: inserted, error: insertError } = await supabase
+        .from('meters')
+        .insert([
+          {
+            user_id: userId,
+            name: storeName, // Kunci kolom disesuaikan ke 'name'
+            meter_number: meterNumber,
+            power_va: parseInt(powerVa),
+          },
+        ]);
 
       if (insertError) throw insertError;
 
       // 3. Berhasil -> Redirect ke Dashboard
       router.push('/');
-      router.refresh();
+      // router.refresh(); // biasanya tidak perlu, router.push sudah mengarahkan
     } catch (err: any) {
       console.error('Gagal menambah toko:', err);
-      setErrorMessage(err.message || 'Terjadi kesalahan saat menyimpan data toko.');
+      setErrorMessage(err?.message || 'Terjadi kesalahan saat menyimpan data toko.');
     } finally {
       setIsSubmitting(false);
     }
