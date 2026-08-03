@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Metadata, Viewport } from 'next';
-import './globals.css';
+import '@/app/globals.css';
 import { BottomNav } from '@/components/layout/bottom-nav';
 
 export const metadata: Metadata = {
