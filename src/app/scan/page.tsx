@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Camera, RefreshCw } from 'lucide-react';
+import { Camera, RefreshCw, Edit3, Check } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
 import { createClient } from '@/lib/supabase/client';
@@ -18,20 +18,25 @@ export default function ScanPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
+  // ✏️ State Baru untuk Edit Manual
+  const [isEditing, setIsEditing] = useState(false);
+  const [manualValue, setManualValue] = useState<string>('');
+
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsProcessing(true);
     setValidationResult(null);
+    setIsEditing(false);
 
     try {
-      // 1. Resize & Compress Gambar
+      // 1. Compress Gambar
       const compressedBlob = await processAndCompressImage(file);
       setImageBlob(compressedBlob);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir Asli dari Supabase
+      // 2. Ambil Bacaan Terakhir
       let lastReadingValue = 0;
       const { data: lastReading } = await supabase
         .from('meter_readings')
@@ -44,7 +49,7 @@ export default function ScanPage() {
         lastReadingValue = lastReading.kwh;
       }
 
-      // 3. Jalankan OCR menggunakan Gemini 2.5 Flash (via API Route) ⚡
+      // 3. OCR via Gemini 2.5 Flash API Route
       const formData = new FormData();
       formData.append('image', compressedBlob);
 
@@ -60,7 +65,7 @@ export default function ScanPage() {
 
       const ocrData = await res.json();
 
-      // 4. Jalankan AI Validation Engine Bawaan
+      // 4. Validasi AI
       const validated = AIValidationEngine.validate(
         ocrData.rawText,
         ocrData.confidence,
@@ -68,6 +73,7 @@ export default function ScanPage() {
       );
 
       setValidationResult(validated);
+      setManualValue(validated.validatedValue.toString());
     } catch (err: any) {
       console.error('Proses OCR Gagal:', err);
       alert(`Gagal membaca gambar: ${err.message || 'Silakan coba foto ulang.'}`);
@@ -80,12 +86,19 @@ export default function ScanPage() {
   const handleSave = async () => {
     if (!validationResult) return;
 
+    const finalKwh = parseFloat(manualValue);
+    if (isNaN(finalKwh) || finalKwh <= 0) {
+      alert('Masukkan angka kWh yang valid.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const { error } = await supabase.from('meter_readings').insert([
         {
-          kwh: validationResult.validatedValue,
-          confidence: validationResult.confidence,
+          kwh: finalKwh,
+          // Jika diubah manual oleh pengguna, tandai confidence atau simpan catatan
+          confidence: isEditing ? 100 : validationResult.confidence,
           created_at: new Date().toISOString(),
         },
       ]);
@@ -148,25 +161,50 @@ export default function ScanPage() {
         <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex justify-between items-center border-b pb-2">
             <span className="text-xs font-semibold text-slate-500">Hasil Pembacaan Gemini AI</span>
-            <span
-              className={`text-xs px-2 py-0.5 rounded font-bold ${
-                validationResult.confidence > 70
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-amber-100 text-amber-800'
-              }`}
-            >
-              Confidence: {validationResult.confidence.toFixed(0)}%
-            </span>
-          </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditing(!isEditing)}
+                className="text-xs text-teal-700 font-semibold flex items-center gap-1 bg-teal-50 hover:bg-teal-100 px-2 py-1 rounded-md transition"
+              >
+                {isEditing ? <Check className="w-3.5 h-3.5" /> : <Edit3 className="w-3.5 h-3.5" />}
+                {isEditing ? 'Selesai' : 'Edit'}
+              </button>
 
-          <div className="text-center py-2">
-            <div className="text-3xl font-extrabold text-slate-900">
-              {validationResult.validatedValue.toFixed(1)}{' '}
-              <span className="text-sm font-normal text-slate-500">kWh</span>
+              <span
+                className={`text-xs px-2 py-0.5 rounded font-bold ${
+                  validationResult.confidence > 70
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {validationResult.confidence.toFixed(0)}%
+              </span>
             </div>
           </div>
 
-          {validationResult.correctionsMade.length > 0 && (
+          <div className="text-center py-2">
+            {isEditing ? (
+              <div className="flex items-center justify-center gap-2 max-w-[200px] mx-auto">
+                <input
+                  type="number"
+                  step="0.1"
+                  value={manualValue}
+                  onChange={(e) => setManualValue(e.target.value)}
+                  className="w-full text-2xl font-bold text-center border-2 border-teal-500 rounded-lg p-1 focus:outline-none"
+                  autoFocus
+                />
+                <span className="text-sm font-semibold text-slate-500">kWh</span>
+              </div>
+            ) : (
+              <div className="text-3xl font-extrabold text-slate-900">
+                {parseFloat(manualValue || '0').toFixed(1)}{' '}
+                <span className="text-sm font-normal text-slate-500">kWh</span>
+              </div>
+            )}
+          </div>
+
+          {validationResult.correctionsMade.length > 0 && !isEditing && (
             <div className="p-2.5 bg-slate-50 rounded-lg text-xs space-y-1">
               <span className="font-semibold text-slate-700 block">Catatan Penyesuaian AI:</span>
               <ul className="list-disc pl-4 text-slate-600 space-y-0.5">
@@ -177,7 +215,7 @@ export default function ScanPage() {
             </div>
           )}
 
-          {/* Tombol Simpan Terhubung */}
+          {/* Tombol Simpan */}
           <Button
             onClick={handleSave}
             disabled={isSaving}
