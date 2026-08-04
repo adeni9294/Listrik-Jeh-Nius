@@ -7,6 +7,7 @@ import { Camera, RefreshCw, Edit3, Check, Store } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
 import { createClient } from '@/lib/supabase';
+import { fetchMeterReadingsClient } from '@/lib/meterReadingsClient';
 
 interface Meter {
   id: string;
@@ -70,19 +71,17 @@ export default function ScanPage() {
       const compressedBlob = await processAndCompressImage(file);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir Asli dari Toko yang Dipilih
+      // 2. Ambil Bacaan Terakhir Asli dari Toko yang Dipilih (gunakan helper yang konsisten)
       let lastReadingValue = 0;
       if (selectedMeterId) {
-        const { data: lastReading } = await supabase
-          .from('meter_readings')
-          .select('kwh')
-          .eq('meter_id', selectedMeterId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (lastReading) {
-          lastReadingValue = lastReading.kwh;
+        try {
+          const readings = await fetchMeterReadingsClient(selectedMeterId, 1); // latest first
+          if (readings && readings.length > 0) {
+            lastReadingValue = Number(readings[0].kwh ?? 0);
+          }
+        } catch (e) {
+          console.warn('Gagal ambil last reading:', e);
+          lastReadingValue = 0;
         }
       }
 

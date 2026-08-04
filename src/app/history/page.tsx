@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Calendar, CheckCircle2, Cpu, RefreshCw, Store, Camera } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { createClient } from '@/lib/supabase/client';
+import { fetchMeterReadingsClient, Reading } from '@/lib/meterReadingsClient';
 
 interface Meter {
   id: string;
@@ -13,24 +13,11 @@ interface Meter {
   meter_number: string;
 }
 
-interface ReadingHistoryItem {
-  id: string;
-  created_at: string;
-  kwh: number;
-  confidence: number | null;
-  status: string | null;
-  meter_id: string;
-  store_name: string;
-  dailyUsage: number | null;
-}
-
 export default function HistoryPage() {
-  const supabase = createClient();
-
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
-  const [historyData, setHistoryData] = useState<ReadingHistoryItem[]>([]);
+  const [historyData, setHistoryData] = useState<Reading[]>([]);
 
   useEffect(() => {
     fetchHistoryData();
@@ -39,73 +26,18 @@ export default function HistoryPage() {
   const fetchHistoryData = async () => {
     setLoading(true);
     try {
-      // 1. Ambil daftar toko jika belum di-load
+      const readings = await fetchMeterReadingsClient(selectedMeterId, 500); // latest first
+      setHistoryData(readings);
+
+      // derive meters list from readings if not present
       if (meters.length === 0) {
-        const { data: metersData } = await supabase
-          .from('meters')
-          .select('id, store_name, meter_number')
-          .order('created_at', { ascending: false });
-
-        if (metersData) {
-          setMeters(metersData);
-        }
+        const unique = Array.from(
+          new Map(readings.map((r) => [r.meter_id, { id: r.meter_id, store_name: r.store_name ?? 'Toko', meter_number: '' }])).values()
+        );
+        setMeters(unique);
       }
-
-      // 2. Query data meter_readings dengan Join ke tabel meters
-      let query = supabase
-        .from('meter_readings')
-        .select(`
-          id,
-          kwh,
-          confidence_score,
-          status,
-          created_at,
-          meter_id,
-          meters (
-            store_name
-          )
-        `)
-        .order('created_at', { ascending: false });
-
-      if (selectedMeterId !== 'all') {
-        query = query.eq('meter_id', selectedMeterId);
-      }
-
-      const { data: rawReadings, error } = await query;
-
-      if (error) throw error;
-
-      if (!rawReadings || rawReadings.length === 0) {
-        setHistoryData([]);
-        setLoading(false);
-        return;
-      }
-
-      // 3. Format & Hitung Selisih Pemakaian Antar Scan
-      const formattedItems: ReadingHistoryItem[] = rawReadings.map((item: any, index: number) => {
-        let usage = null;
-
-        // Bandingkan dengan bacaan sebelumnya jika ada (data diurutkan DESC)
-        if (index < rawReadings.length - 1) {
-          const previousKwh = rawReadings[index + 1].kwh;
-          usage = Math.max(0, previousKwh - item.kwh); // Selisih sisa token/kWh
-        }
-
-        return {
-          id: item.id,
-          created_at: item.created_at,
-          kwh: item.kwh,
-          confidence: item.confidence_score ? Math.round(item.confidence_score * 100) : 90,
-          status: item.status || 'VERIFIED',
-          meter_id: item.meter_id,
-          store_name: item.meters?.store_name || 'Toko',
-          dailyUsage: usage,
-        };
-      });
-
-      setHistoryData(formattedItems);
     } catch (err: any) {
-      console.error('Gagal mengambil data riwayat:', err.message);
+      console.error('Gagal mengambil data riwayat:', err.message || err);
     } finally {
       setLoading(false);
     }
@@ -154,7 +86,7 @@ export default function HistoryPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {historyData.map((item) => {
+          {historyData.map((item, index) => {
             const dateObj = new Date(item.created_at);
             const formattedDate = dateObj.toLocaleDateString('id-ID', {
               day: 'numeric',
@@ -165,6 +97,9 @@ export default function HistoryPage() {
               hour: '2-digit',
               minute: '2-digit',
             });
+
+            const next = historyData[index + 1];
+            const usage = next ? Math.max(0, item.kwh - next.kwh) : null; // array is DESC, so current - next
 
             return (
               <Card key={item.id} className="overflow-hidden border-slate-200 shadow-sm hover:border-teal-300 transition">
@@ -185,11 +120,11 @@ export default function HistoryPage() {
                     <div className="flex items-center gap-2 text-[11px] text-slate-500">
                       <span className="font-semibold text-teal-800 bg-teal-50 px-2 py-0.5 rounded border border-teal-100 flex items-center gap-1">
                         <Store className="w-3 h-3 text-teal-600" />
-                        {item.store_name}
+                        {item.store_name || 'Toko'}
                       </span>
-                      {item.dailyUsage !== null && (
+                      {usage !== null && (
                         <span>
-                          Pemakaian: <span className="font-semibold text-teal-700">-{item.dailyUsage.toFixed(1)} kWh</span>
+                          Pemakaian: <span className="font-semibold text-teal-700">-{usage.toFixed(1)} kWh</span>
                         </span>
                       )}
                     </div>
@@ -205,9 +140,9 @@ export default function HistoryPage() {
                         <Cpu className="w-3 h-3 text-amber-600" /> AI Adjusted
                       </span>
                     )}
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      Conf: {item.confidence}%
-                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">{`Conf: ${
+                      item.confidence_score ? Math.round(item.confidence_score * 100) : 90
+                    }%`}</span>
                   </div>
                 </CardContent>
               </Card>
