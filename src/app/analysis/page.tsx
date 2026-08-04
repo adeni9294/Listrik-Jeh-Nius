@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Clock, Zap, Wallet, RefreshCw, Cpu, Activity, AlertCircle } from 'lucide-react';
+import { Clock, Zap, Wallet, RefreshCw, Cpu, Activity, AlertCircle, Lightbulb, Thermometer, ShieldCheck, Snowflake } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface Meter {
@@ -38,7 +38,6 @@ export default function AnalysisPage() {
   const fetchAnalysisData = async () => {
     setLoading(true);
     try {
-      // 1. Ambil daftar toko jika belum ter-load
       if (meters.length === 0) {
         const { data: metersData } = await supabase
           .from('meters')
@@ -50,9 +49,7 @@ export default function AnalysisPage() {
         }
       }
 
-      // 2. Hitung laju per jam berdasarkan 2 scan TERBARU
       if (selectedMeterId === 'all') {
-        // Mode Semua Toko: Akumulasi rata-rata laju tiap toko
         const { data: allMeters } = await supabase.from('meters').select('id');
         let totalHourlyRate = 0;
         let countWithData = 0;
@@ -68,7 +65,6 @@ export default function AnalysisPage() {
         const avgHourly = countWithData > 0 ? totalHourlyRate / countWithData : 0;
         applyMetrics(avgHourly);
       } else {
-        // Mode Spesifik Toko
         const rate = await calculateHourlyRateForMeter(selectedMeterId);
         applyMetrics(rate);
       }
@@ -79,7 +75,6 @@ export default function AnalysisPage() {
     }
   };
 
-  // Helper untuk menghitung kWh/jam dari 2 scan terakhir
   const calculateHourlyRateForMeter = async (meterId: string): Promise<number> => {
     const { data: readings } = await supabase
       .from('meter_readings')
@@ -98,21 +93,19 @@ export default function AnalysisPage() {
 
     const diffHours = (latestTime - previousTime) / (1000 * 60 * 60);
 
-    // Normal penggunaan (angka meteran berkurang)
     if (previousVal >= latestVal) {
       const consumedKwh = previousVal - latestVal;
 
       if (diffHours >= 0.25) {
         setIsTestInterval(false);
-        return consumedKwh / diffHours; // kWh / Jam Riil
+        return consumedKwh / diffHours;
       } else if (diffHours > 0) {
-        // Jika scan uji coba < 15 menit, gunakan nilai delta langsung tanpa pengali mikro
         setIsTestInterval(true);
         return consumedKwh;
       }
     }
 
-    return 0; // Kasus Top-Up Token
+    return 0;
   };
 
   const applyMetrics = (ratePerHour: number) => {
@@ -126,7 +119,7 @@ export default function AnalysisPage() {
     setMonthlyEstCost(monthlyCost);
   };
 
-  // Estimasi Proporsi Alat Listrik Toko (Dihitung Dinamis dari Rata-rata Harian)
+  // Estimasi Proporsi Alat Listrik Toko
   const deviceEstimates = [
     {
       name: 'AC & Pendingin Toko',
@@ -153,6 +146,9 @@ export default function AnalysisPage() {
       color: 'bg-indigo-500',
     },
   ];
+
+  // Kalkulasi Potensi Hemat (Estimasi 15% dari total pengeluaran bulanan)
+  const potentialSavingsMonthly = monthlyEstCost * 0.15;
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
@@ -197,7 +193,6 @@ export default function AnalysisPage() {
 
           {/* 3 Overview Cards Utama */}
           <div className="grid grid-cols-3 gap-2">
-            {/* 1. Laju Per Jam */}
             <Card className="bg-slate-50 border-slate-200">
               <CardContent className="p-3 text-center">
                 <div className="flex justify-center items-center gap-1 text-teal-600 mb-1">
@@ -211,7 +206,6 @@ export default function AnalysisPage() {
               </CardContent>
             </Card>
 
-            {/* 2. Tren Per Hari */}
             <Card className="bg-slate-50 border-slate-200">
               <CardContent className="p-3 text-center">
                 <div className="flex justify-center items-center gap-1 text-amber-600 mb-1">
@@ -225,7 +219,6 @@ export default function AnalysisPage() {
               </CardContent>
             </Card>
 
-            {/* 3. Estimasi Beli Token Bulan Depan */}
             <Card className="bg-teal-900 text-white border-none shadow-md">
               <CardContent className="p-3 text-center">
                 <div className="flex justify-center items-center gap-1 text-teal-200 mb-1">
@@ -270,7 +263,7 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
 
-          {/* AI Recommendation for Analysis */}
+          {/* AI Recommendation for Budget */}
           <Card className="border-teal-200 bg-teal-50/50">
             <CardContent className="p-4 flex items-start gap-3">
               <Cpu className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
@@ -279,6 +272,63 @@ export default function AnalysisPage() {
                 <p>
                   Berdasarkan laju <strong>{hourlyRate.toFixed(2)} kWh/jam</strong>, siapkan estimasi pembelian token sebesar <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan.
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* BARU: Rekomendasi Hemat Energi (Actionable Insights) */}
+          <Card className="border-emerald-200 bg-emerald-50/30 shadow-sm">
+            <CardHeader className="pb-2 border-b border-emerald-100">
+              <CardTitle className="text-sm flex items-center justify-between text-emerald-900">
+                <div className="flex items-center gap-2">
+                  <Lightbulb className="w-4 h-4 text-amber-500 fill-amber-400" />
+                  Rekomendasi Hemat Energi
+                </div>
+                {potentialSavingsMonthly > 0 && (
+                  <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                    Potensi Hemat: ~Rp {Math.round(potentialSavingsMonthly).toLocaleString('id-ID')}/bln
+                  </span>
+                )}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-3 space-y-3">
+              {/* Insight 1: AC */}
+              <div className="flex items-start gap-2.5 text-xs text-slate-700">
+                <div className="p-1.5 bg-teal-100 rounded-lg text-teal-700 shrink-0 mt-0.5">
+                  <Thermometer className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-bold text-slate-800 block">Atur Suhu AC ke Ideal (23°C - 24°C)</span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Menaikkan suhu AC dari 18°C ke 24°C menghemat hingga <strong>15-20% listrik AC</strong> tanpa mengurangi kenyamanan pengunjung.
+                  </p>
+                </div>
+              </div>
+
+              {/* Insight 2: Showcase / Kulkas */}
+              <div className="flex items-start gap-2.5 text-xs text-slate-700">
+                <div className="p-1.5 bg-blue-100 rounded-lg text-blue-700 shrink-0 mt-0.5">
+                  <Snowflake className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-bold text-slate-800 block">Optimalkan Kondensor & Pintu Showcase</span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Bersihkan debu kompresor showcase sebulan sekali dan pastikan karet pintu rapat agar kompresor tidak bekerja nonstop.
+                  </p>
+                </div>
+              </div>
+
+              {/* Insight 3: Operasional Malam */}
+              <div className="flex items-start gap-2.5 text-xs text-slate-700">
+                <div className="p-1.5 bg-amber-100 rounded-lg text-amber-700 shrink-0 mt-0.5">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-bold text-slate-800 block">Matikan Neon Box & Lampu Utama Saat Toko Tutup</span>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Gunakan *timer* otomatis untuk mematikan lampu reklame toko pada pukul 22.00 hingga pagi hari.
+                  </p>
+                </div>
               </div>
             </CardContent>
           </Card>
