@@ -7,7 +7,7 @@ import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { getTariffRate, TARIF_PLN } from '@/lib/constants';
+import { getTariffRate } from '@/lib/constants';
 
 interface MeterWithReading {
   id: string;
@@ -20,6 +20,8 @@ interface MeterWithReading {
   weeklyProjection: number;// kWh / minggu
   monthlyProjection: number;// kWh / bulan
   lastScanIntervalHours: number;
+  confidence: number;      // Nilai tingkat keandalan scan OCR
+  totalScansCount: number; // Jumlah total pindaian toko
 }
 
 export default function DashboardPage() {
@@ -35,8 +37,8 @@ export default function DashboardPage() {
   const [totalEstimatedRupiah, setTotalEstimatedRupiah] = useState<number>(0);
   const [avgHourlyRateAll, setAvgHourlyRateAll] = useState<number>(0);
 
-  const [intelligenceScore, setIntelligenceScore] = useState<number>(88);
-  const [dataQuality, setDataQuality] = useState<number>(92);
+  const [intelligenceScore, setIntelligenceScore] = useState<number>(0);
+  const [dataQuality, setDataQuality] = useState<number>(0);
   const [daysLeft, setDaysLeft] = useState<number>(0);
 
   useEffect(() => {
@@ -76,18 +78,27 @@ export default function DashboardPage() {
       let accumLastReadings = 0;
       let accumHourlyRate = 0;
       let accumRupiah = 0;
+      let totalConfidenceSum = 0;
+      let totalReadingsCountSum = 0;
       const computedMeters: MeterWithReading[] = [];
 
-      // 2. Query 2 data scan TERBARU untuk setiap toko (Berdasarkan created_at DESC)
+      // 2. Query data scan TERBARU & statistik confidence untuk setiap toko
       for (const m of meters) {
+        // Ambil 2 pindaian terbaru untuk hitung laju pemakaian
         const { data: readings, error: readErr } = await supabase
           .from('meter_readings')
-          .select('id, kwh, meter_value, created_at')
+          .select('id, kwh, meter_value, confidence, created_at')
           .eq('meter_id', m.id)
           .order('created_at', { ascending: false })
           .limit(2);
 
         if (readErr) console.warn(`Error fetching readings for ${m.id}:`, readErr);
+
+        // Ambil agregat total pindaian & rata-rata confidence untuk Data Quality dinamis
+        const { data: allReadings } = await supabase
+          .from('meter_readings')
+          .select('confidence')
+          .eq('meter_id', m.id);
 
         let lastVal: number | null = null;
         let hourlyRate = 0;
@@ -95,6 +106,16 @@ export default function DashboardPage() {
         let weeklyProj = 0;
         let monthlyProj = 0;
         let intervalHours = 0;
+
+        // Hitung Rata-rata confidence per toko
+        const scanCount = allReadings?.length || 0;
+        let avgMeterConfidence = 85; // Default jika belum ada confidence
+        if (scanCount > 0) {
+          const sumConf = allReadings?.reduce((acc, r) => acc + Number(r.confidence || 85), 0) || 0;
+          avgMeterConfidence = Math.round(sumConf / scanCount);
+          totalConfidenceSum += sumConf;
+          totalReadingsCountSum += scanCount;
+        }
 
         if (readings && readings.length > 0) {
           lastVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
@@ -152,10 +173,28 @@ export default function DashboardPage() {
           weeklyProjection: weeklyProj,
           monthlyProjection: monthlyProj,
           lastScanIntervalHours: intervalHours,
+          confidence: avgMeterConfidence,
+          totalScansCount: scanCount,
         });
       }
 
       setMetersData(computedMeters);
+
+      // --- KALKULASI DATA QUALITY DINAMIS ---
+      const globalDataQuality = totalReadingsCountSum > 0
+        ? Math.min(100, Math.round(totalConfidenceSum / totalReadingsCountSum))
+        : 85;
+      setDataQuality(globalDataQuality);
+
+      // --- KALKULASI ENERGY INTELLIGENCE SCORE DINAMIS ---
+      // Didasarkan pada: Data Quality, Rutinitas Scan, dan Konsistensi Toko
+      let baseScore = globalDataQuality * 0.85; // 85% porsi dari akurasi OCR
+      if (totalReadingsCountSum >= 5) baseScore += 10; // Bonus jika pengguna rajin scan
+      else if (totalReadingsCountSum >= 2) baseScore += 5;
+
+      const computedScore = Math.min(99, Math.max(20, Math.round(baseScore)));
+      setIntelligenceScore(computedScore);
+
       setRemainingTokenKwh(accumLastReadings);
       setTotalEstimatedRupiah(accumRupiah);
 
@@ -169,7 +208,6 @@ export default function DashboardPage() {
         : 0;
       setDaysLeft(estimatedDays);
 
-      setIntelligenceScore(Math.min(98, 75 + meters.length * 5));
     } catch (err: any) {
       console.error('Error fetching dashboard:', err?.message || err);
     } finally {
@@ -207,6 +245,31 @@ export default function DashboardPage() {
   const filteredMeters = selectedMeterId === 'all'
     ? metersData
     : metersData.filter(m => m.id === selectedMeterId);
+
+  // Kalkulasi metrik dinamis saat filter toko dipilih
+  const displayTokenKwh = selectedMeterId === 'all'
+    ? remainingTokenKwh
+    : filteredMeters[0]?.lastReading ?? 0;
+
+  const displayEstimatedRupiah = selectedMeterId === 'all'
+    ? totalEstimatedRupiah
+    : (filteredMeters[0]?.lastReading ?? 0) * getTariffRate(filteredMeters[0]?.power_va ?? 1300);
+
+  const displayHourlyRate = selectedMeterId === 'all'
+    ? avgHourlyRateAll
+    : filteredMeters[0]?.hourlyRate ?? 0;
+
+  const displayDaysLeft = selectedMeterId === 'all'
+    ? daysLeft
+    : (displayHourlyRate * 24 > 0 ? Math.max(0, Math.floor(displayTokenKwh / (displayHourlyRate * 24))) : 0);
+
+  const displayDataQuality = selectedMeterId === 'all'
+    ? dataQuality
+    : filteredMeters[0]?.confidence ?? 85;
+
+  const displayIntelligenceScore = selectedMeterId === 'all'
+    ? intelligenceScore
+    : Math.min(99, Math.max(20, Math.round((filteredMeters[0]?.confidence ?? 85) * 0.85 + (filteredMeters[0]?.totalScansCount >= 3 ? 10 : 5))));
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
@@ -256,22 +319,28 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Energy Intelligence Score Card */}
-          <Card className="bg-gradient-to-br from-teal-700 to-teal-900 text-white shadow-xl border-none">
+          {/* Energy Intelligence Score Card (Dinamis) */}
+          <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
             <CardContent className="p-5">
               <div className="flex justify-between items-start">
                 <div>
-                  <span className="text-xs opacity-80 uppercase tracking-wider">Energy Intelligence Score</span>
+                  <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase">
+                    Energy Intelligence Score
+                  </span>
                   <div className="text-4xl font-extrabold mt-1">
-                    {intelligenceScore}<span className="text-lg font-normal">/100</span>
+                    {displayIntelligenceScore}<span className="text-lg font-normal text-emerald-300">/100</span>
                   </div>
-                  <span className="inline-block mt-2 px-2.5 py-0.5 bg-emerald-500/30 text-emerald-200 text-xs rounded-md border border-emerald-400/30">
-                    {intelligenceScore > 80 ? 'Excellent Efficiency' : 'Good Efficiency'}
+                  <span className="inline-block mt-2 px-2.5 py-0.5 bg-emerald-500/20 text-emerald-200 text-xs font-semibold rounded-md border border-emerald-400/20">
+                    {displayIntelligenceScore >= 85 ? 'Excellent Efficiency' : 'Good Efficiency'}
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-xs opacity-80">Data Quality</span>
-                  <div className="text-lg font-bold text-teal-200">{dataQuality}%</div>
+                  <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase">
+                    Data Quality
+                  </span>
+                  <div className="text-2xl font-extrabold text-white mt-1">
+                    {displayDataQuality}%
+                  </div>
                 </div>
               </div>
             </CardContent>
@@ -286,10 +355,10 @@ export default function DashboardPage() {
                   <span className="text-xs font-semibold">Total Sisa Token</span>
                 </div>
                 <div className="text-xl font-bold text-slate-800">
-                  {remainingTokenKwh.toFixed(1)} <span className="text-xs font-normal">kWh</span>
+                  {displayTokenKwh.toFixed(1)} <span className="text-xs font-normal">kWh</span>
                 </div>
                 <p className="text-[10px] text-slate-500 mt-1">
-                  ~ Rp {Math.round(totalEstimatedRupiah).toLocaleString('id-ID')}
+                  ~ Rp {Math.round(displayEstimatedRupiah).toLocaleString('id-ID')}
                 </p>
               </CardContent>
             </Card>
@@ -301,10 +370,10 @@ export default function DashboardPage() {
                   <span className="text-xs font-semibold">Estimasi Habis</span>
                 </div>
                 <div className="text-xl font-bold text-slate-800">
-                  {daysLeft} <span className="text-xs font-normal">Hari Lagi</span>
+                  {displayDaysLeft} <span className="text-xs font-normal">Hari Lagi</span>
                 </div>
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Laju: {avgHourlyRateAll.toFixed(2)} kWh/jam
+                  Laju: {displayHourlyRate.toFixed(2)} kWh/jam
                 </p>
               </CardContent>
             </Card>
@@ -319,7 +388,7 @@ export default function DashboardPage() {
               <select
                 value={selectedMeterId}
                 onChange={(e) => setSelectedMeterId(e.target.value)}
-                className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-teal-500"
+                className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm"
               >
                 <option value="all">Semua Toko ({metersData.length})</option>
                 {metersData.map((m) => (
@@ -418,8 +487,8 @@ export default function DashboardPage() {
             <CardContent className="p-4 pt-0 text-xs text-slate-700 space-y-2">
               <p>
                 Rata-rata konsumsi listrik toko Anda saat ini adalah{' '}
-                <strong>{avgHourlyRateAll.toFixed(2)} kWh/jam</strong> (sekitar{' '}
-                <strong>{(avgHourlyRateAll * 24).toFixed(1)} kWh/hari</strong>).
+                <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (sekitar{' '}
+                <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
               </p>
               <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
                 💡 <strong>Rekomendasi Gemini AI:</strong> Isi ulang token disarankan ketika sisa token berada di bawah{' '}
