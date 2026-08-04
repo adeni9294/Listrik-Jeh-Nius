@@ -18,6 +18,7 @@ import {
   CheckSquare,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getTariffRate, TARIF_PLN } from '@/lib/constants';
 
 interface Meter {
   id: string;
@@ -46,7 +47,6 @@ export default function AnalysisPage() {
   const [isSpike, setIsSpike] = useState<boolean>(false);
   const [spikePercent, setSpikePercent] = useState<number>(0);
 
-  const TARIF_PER_KWH = 1444.7; // Tarif PLN Non-Subsidi B-1 / R-1
   const NORMAL_HOURLY_THRESHOLD = 10.0; // Ambang batas normal (10 kWh/jam)
 
   useEffect(() => {
@@ -57,36 +57,51 @@ export default function AnalysisPage() {
   const fetchAnalysisData = async () => {
     setLoading(true);
     try {
-      if (meters.length === 0) {
+      let currentMeters = meters;
+      if (currentMeters.length === 0) {
         const { data: metersData } = await supabase
           .from('meters')
           .select('id, store_name, meter_number, power_va')
           .order('created_at', { ascending: false });
 
-        if (metersData) setMeters(metersData);
+        if (metersData) {
+          setMeters(metersData);
+          currentMeters = metersData;
+        }
       }
 
       if (selectedMeterId === 'all') {
-        const { data: allMeters } = await supabase.from('meters').select('id');
         let totalHourlyRate = 0;
+        let totalMonthlyCost = 0;
         let countWithData = 0;
 
-        if (allMeters && allMeters.length > 0) {
-          for (const m of allMeters) {
+        if (currentMeters && currentMeters.length > 0) {
+          for (const m of currentMeters) {
             const rate = await calculateHourlyRateForMeter(m.id);
             totalHourlyRate += rate;
+            
+            // Hitung estimasi biaya bulanan per toko sesuai daya VA-nya
+            const storeTariff = getTariffRate(m.power_va || 1300);
+            const storeMonthlyKwh = rate * 24 * 30;
+            totalMonthlyCost += storeMonthlyKwh * storeTariff;
+
             if (rate > 0) countWithData++;
           }
         }
 
         const avgHourly = countWithData > 0 ? totalHourlyRate / countWithData : 0;
-        applyMetrics(avgHourly);
+        applyMetrics(avgHourly, totalMonthlyCost, true);
       } else {
+        const activeMeter = currentMeters.find((m) => m.id === selectedMeterId);
+        const activePowerVa = activeMeter?.power_va || 1300;
+        const tariff = getTariffRate(activePowerVa);
+
         const rate = await calculateHourlyRateForMeter(selectedMeterId);
-        applyMetrics(rate);
+        const monthlyCost = rate * 24 * 30 * tariff;
+        applyMetrics(rate, monthlyCost, false);
       }
     } catch (err: any) {
-      console.error('Gagal mengambil data analisis:', err.message);
+      console.error('Gagal mengambil data analisis:', err?.message || err);
     } finally {
       setLoading(false);
     }
@@ -125,10 +140,9 @@ export default function AnalysisPage() {
     return 0;
   };
 
-  const applyMetrics = (ratePerHour: number) => {
+  const applyMetrics = (ratePerHour: number, calculatedMonthlyCost: number, isAllStores: boolean) => {
     const daily = ratePerHour * 24;
     const monthlyKwh = daily * 30;
-    const monthlyCost = monthlyKwh * TARIF_PER_KWH;
 
     // Evaluasi Lonjakan Pemakaian
     if (ratePerHour > NORMAL_HOURLY_THRESHOLD) {
@@ -145,7 +159,7 @@ export default function AnalysisPage() {
     setHourlyRate(ratePerHour);
     setDailyAvgKwh(daily);
     setMonthlyEstKwh(monthlyKwh);
-    setMonthlyEstCost(monthlyCost);
+    setMonthlyEstCost(calculatedMonthlyCost);
   };
 
   // Estimasi Beban Perangkat (Per Hari)
