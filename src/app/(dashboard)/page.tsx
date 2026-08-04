@@ -17,6 +17,8 @@ interface MeterWithReading {
   lastReading: number | null;
   monthlyUsage: number;
   perDay?: number;
+  anomaliesCount?: number;
+  hasRollover?: boolean;
 }
 
 export default function DashboardPage() {
@@ -102,7 +104,7 @@ export default function DashboardPage() {
         // Ambil semua bacaan bulan ini
         const { data: monthReadings, error: monthErr } = await supabase
           .from('meter_readings')
-          .select('kwh, created_at')
+          .select('id, kwh, created_at')
           .eq('meter_id', m.id)
           .gte('created_at', firstDayOfMonth)
           .order('created_at', { ascending: true });
@@ -113,14 +115,19 @@ export default function DashboardPage() {
 
         let storeMonthlyUsage = 0;
         let storePerDay = 0;
+        let anomaliesCount = 0;
+        let hasRollover = false;
 
         if (monthReadings && monthReadings.length > 1) {
-          const scans = monthReadings.map((r: any) => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }));
-          const summary = computeConsumption(scans);
+          const scans = monthReadings.map((r: any) => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at, id: r.id }));
+          const summary = computeConsumption(scans, { maxMeterValue: 99999 });
 
           // total usage this month (sum of positive deltas across valid intervals)
           storeMonthlyUsage = summary.intervals.filter((i) => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0);
           storePerDay = summary.kwhPerHourUsedForProjection * 24;
+
+          anomaliesCount = summary.intervals.filter(i => !i.valid).length;
+          hasRollover = summary.intervals.some(i => i.isRollover === true);
         }
 
         const lastVal = latest ? latest.kwh : 0;
@@ -135,6 +142,8 @@ export default function DashboardPage() {
           lastReading: latest ? latest.kwh : null,
           monthlyUsage: storeMonthlyUsage,
           perDay: storePerDay,
+          anomaliesCount,
+          hasRollover,
         });
       }
 
@@ -341,6 +350,19 @@ export default function DashboardPage() {
                         <p className="text-[11px] text-slate-500">
                           PLN ID: <span className="font-mono text-slate-700">{m.meter_number}</span> • {m.power_va} VA
                         </p>
+
+                        <div className="flex items-center gap-2 mt-2">
+                          {m.hasRollover && (
+                            <span className="text-[10px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-200">
+                              Rollover Terdeteksi
+                            </span>
+                          )}
+                          {m.anomaliesCount && m.anomaliesCount > 0 && (
+                            <span className="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200">
+                              {m.anomaliesCount} Anomali
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span className="text-[10px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-full font-bold border border-teal-200">
                         Aktif
