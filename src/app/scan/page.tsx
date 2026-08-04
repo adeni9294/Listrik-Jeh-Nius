@@ -155,7 +155,7 @@ const handleSave = async () => {
       meter_value: finalKwh,
       kwh: finalKwh,
 
-      confidence_score: isEditing
+      confidence: isEditing
         ? 100
         : validationResult.confidence,
 
