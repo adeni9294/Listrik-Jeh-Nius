@@ -2,15 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 function arrayBufferToBase64(arrayBuffer: ArrayBuffer): string {
-  // Prefer Node.js Buffer if available (server runtime)
   if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
     return Buffer.from(arrayBuffer).toString('base64');
   }
 
-  // Fallback for edge / browser runtimes: convert in chunks to avoid call stack limits
   let binary = '';
   const bytes = new Uint8Array(arrayBuffer);
-  const chunkSize = 0x8000; // 32KB chunk
+  const chunkSize = 0x8000; // 32KB
   for (let i = 0; i < bytes.length; i += chunkSize) {
     const chunk = bytes.subarray(i, i + chunkSize);
     binary += String.fromCharCode.apply(null, Array.from(chunk));
@@ -18,11 +16,6 @@ function arrayBufferToBase64(arrayBuffer: ArrayBuffer): string {
 
   if (typeof btoa === 'function') {
     return btoa(binary);
-  }
-
-  // Last-resort: Node Buffer conversion for environments where Buffer exists but earlier check failed
-  if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-    return Buffer.from(binary, 'binary').toString('base64');
   }
 
   throw new Error('Tidak dapat mengonversi ArrayBuffer ke base64 di runtime ini');
@@ -51,7 +44,6 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const base64Data = arrayBufferToBase64(arrayBuffer);
 
-    // Initialize client (some SDKs accept a string, others an object)
     let genAI: any;
     try {
       genAI = new (GoogleGenerativeAI as any)(apiKey);
@@ -59,19 +51,24 @@ export async function POST(req: NextRequest) {
       genAI = new (GoogleGenerativeAI as any)({ apiKey });
     }
 
-    // Get model instance if SDK exposes helper
     const model = typeof genAI.getGenerativeModel === 'function'
       ? genAI.getGenerativeModel({
-          model: 'gemini-3.6-flash',
+          model: 'gemini-1.5-flash',
           generationConfig: {
             responseMimeType: 'application/json',
           },
         })
       : genAI;
 
+    // PROMPT DENGAN INSTRUKSI DESIMAL PLN
     const prompt = `
-      Analisis foto layar kWh meteran listrik PLN ini. 
-      Ekstrak HANYA angka total kWh yang tertera pada layar digital/analog.
+      Analisis foto layar kWh meteran listrik PLN prabayar/pascabayar ini.
+      Ekstrak angka sisa/total kWh yang tertera pada layar digital LCD.
+
+      ATURAN KHUSUS MEMBACA METERAN PLN:
+      1. Tanda strip (-) atau titik (.) pada LCD (contoh: "1233-60" atau "1233.60") ADALAH TITIK DESIMAL (KOMA).
+      2. Jangan menggabungkan angka di belakang strip/titik menjadi ribuan.
+      3. Contoh: Jika di layar tertulis "1233-60", hasilnya harus "1233.6" atau "1233.60". BUKAN 123360.
 
       Kembalikan JSON dengan struktur persis seperti ini:
       {
@@ -80,9 +77,9 @@ export async function POST(req: NextRequest) {
         "confidence": 95
       }
 
-      Catatan:
-      - rawText: Teks asli angka yang terbaca.
-      - cleanValue: Tipe data Float/Number dari angka kWh.
+      Aturan Field:
+      - rawText: Teks asli angka yang terbaca (gunakan titik untuk desimal).
+      - cleanValue: Tipe data Float/Number murni (contoh: 1233.6).
       - confidence: Estimasi tingkat kepastian pembacaan (0-100).
     `;
 
@@ -104,7 +101,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tidak mendapatkan respons dari model.' }, { status: 502 });
     }
 
-    // Extract text from various possible shapes
     let responseText = '';
     if (result.response) {
       const r = result.response;
@@ -119,8 +115,6 @@ export async function POST(req: NextRequest) {
       }
     } else if (typeof result === 'string') {
       responseText = result.trim();
-    } else if ((result as any).outputText) {
-      responseText = String((result as any).outputText).trim();
     } else {
       try {
         responseText = JSON.stringify(result);
@@ -138,9 +132,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Response dari model tidak valid JSON', rawResponse: responseText }, { status: 502 });
     }
 
-    // Normalize cleanValue jika berupa string
+    // Normalisasi cleanValue
     if (parsedData && typeof parsedData.cleanValue === 'string') {
-      const num = parseFloat(parsedData.cleanValue.replace(/[^0-9.,-]/g, '').replace(',', '.'));
+      const num = parseFloat(parsedData.cleanValue.replace('-', '.').replace(/[^0-9.]/g, ''));
       parsedData.cleanValue = Number.isFinite(num) ? num : parsedData.cleanValue;
     }
 
