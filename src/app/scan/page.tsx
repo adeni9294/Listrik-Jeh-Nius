@@ -136,11 +136,21 @@ export default function ScanPage() {
 
     setIsSaving(true);
     try {
-      // Pastikan user terautentikasi
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      const user = userData?.user;
-      if (userErr) console.warn('getUser error', userErr);
-      if (!user?.id) {
+      // Coba ambil user Supabase (jika ada)
+      let userId: string | undefined = undefined;
+      try {
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) console.warn('getUser error', userErr);
+        userId = userData?.user?.id;
+      } catch (e) {
+        console.warn('Supabase getUser failed:', e);
+      }
+
+      // Jika tidak ada session Supabase, fallback ke login lokal (LocalStorage)
+      const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
+
+      if (!userId && !activeStoreId) {
+        // Tidak ada autentikasi sama sekali
         alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
         router.push('/login');
         return;
@@ -148,14 +158,15 @@ export default function ScanPage() {
 
       const payload: Record<string, any> = {
         kwh: finalKwh,
-        meter_value: finalKwh, // pastikan meter_value terisi
+        meter_value: finalKwh,
         confidence: isEditing ? 100 : validationResult.confidence,
         reading_date: new Date().toISOString().split('T')[0],
         reading_time: new Date().toTimeString().split(' ')[0],
         created_at: new Date().toISOString(),
-        meter_id: selectedMeterId,
-        user_id: user.id,
+        meter_id: selectedMeterId || activeStoreId,
       };
+
+      if (userId) payload.user_id = userId;
 
       // Insert dan kembalikan row yang baru disimpan
       const { data: insertedRow, error: insertError } = await supabase
