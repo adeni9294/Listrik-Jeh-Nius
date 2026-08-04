@@ -7,6 +7,7 @@ import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { getTariffRate, TARIF_PLN } from '@/lib/constants';
 
 interface MeterWithReading {
   id: string;
@@ -31,6 +32,7 @@ export default function DashboardPage() {
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
   const [remainingTokenKwh, setRemainingTokenKwh] = useState<number>(0);
+  const [totalEstimatedRupiah, setTotalEstimatedRupiah] = useState<number>(0);
   const [avgHourlyRateAll, setAvgHourlyRateAll] = useState<number>(0);
 
   const [intelligenceScore, setIntelligenceScore] = useState<number>(88);
@@ -73,6 +75,7 @@ export default function DashboardPage() {
 
       let accumLastReadings = 0;
       let accumHourlyRate = 0;
+      let accumRupiah = 0;
       const computedMeters: MeterWithReading[] = [];
 
       // 2. Query 2 data scan TERBARU untuk setiap toko (Berdasarkan created_at DESC)
@@ -106,7 +109,7 @@ export default function DashboardPage() {
               time: new Date(readings[1].created_at).getTime(),
             };
 
-            // Hitung selisih jam antar scan (misal jam 10:00 -> 12:30 = 2.5 jam)
+            // Hitung selisih jam antar scan
             const diffMs = latest.time - previous.time;
             intervalHours = diffMs / (1000 * 60 * 60);
 
@@ -114,15 +117,12 @@ export default function DashboardPage() {
             if (previous.kwh >= latest.kwh) {
               const consumedKwh = previous.kwh - latest.kwh;
 
-              // Batas aman: Jika scan < 15 menit (0.25 jam), jangan ekstrapolasi berlebihan
               if (intervalHours >= 0.25) {
                 hourlyRate = consumedKwh / intervalHours;
               } else if (intervalHours > 0) {
-                // Untuk tes cepat < 15 menit, hitung laju langsung tanpa pembagian jam mikro
                 hourlyRate = consumedKwh;
               }
             } else {
-              // Top-Up Token: pemakaian interval diset 0
               hourlyRate = 0;
             }
 
@@ -132,14 +132,20 @@ export default function DashboardPage() {
           }
         }
 
-        if (lastVal !== null) accumLastReadings += lastVal;
+        const storePowerVa = m.power_va || 1300;
+        const tariff = getTariffRate(storePowerVa);
+
+        if (lastVal !== null) {
+          accumLastReadings += lastVal;
+          accumRupiah += lastVal * tariff;
+        }
         accumHourlyRate += hourlyRate;
 
         computedMeters.push({
           id: m.id,
           store_name: m.store_name || m.name,
           meter_number: m.meter_number,
-          power_va: m.power_va || 1300,
+          power_va: storePowerVa,
           lastReading: lastVal,
           hourlyRate,
           dailyProjection: dailyProj,
@@ -151,6 +157,7 @@ export default function DashboardPage() {
 
       setMetersData(computedMeters);
       setRemainingTokenKwh(accumLastReadings);
+      setTotalEstimatedRupiah(accumRupiah);
 
       const avgHourly = meters.length > 0 ? accumHourlyRate / meters.length : 0;
       setAvgHourlyRateAll(avgHourly);
@@ -282,7 +289,7 @@ export default function DashboardPage() {
                   {remainingTokenKwh.toFixed(1)} <span className="text-xs font-normal">kWh</span>
                 </div>
                 <p className="text-[10px] text-slate-500 mt-1">
-                  ~ Rp {Math.round(remainingTokenKwh * 1444.7).toLocaleString('id-ID')}
+                  ~ Rp {Math.round(totalEstimatedRupiah).toLocaleString('id-ID')}
                 </p>
               </CardContent>
             </Card>
@@ -338,57 +345,67 @@ export default function DashboardPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {filteredMeters.map((m) => (
-                <Card key={m.id} className="border-slate-200 hover:border-teal-300 transition">
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex justify-between items-start border-b pb-2">
-                      <div>
-                        <h3 className="font-bold text-slate-800 text-sm">{m.store_name}</h3>
-                        <p className="text-[11px] text-slate-500">
-                          PLN ID: <span className="font-mono text-slate-700">{m.meter_number}</span> • {m.power_va} VA
-                        </p>
-                      </div>
-                      <span className="text-[10px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-full font-bold border border-teal-200">
-                        Aktif
-                      </span>
-                    </div>
+              {filteredMeters.map((m) => {
+                const storeTariff = getTariffRate(m.power_va);
+                const storeEstimatedRupiah = (m.lastReading ?? 0) * storeTariff;
 
-                    {/* Rata-Rata Per Jam & Sisa Meteran */}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-slate-50 p-2.5 rounded-xl">
-                        <span className="text-slate-500 block text-[10px]">Sisa Meteran</span>
-                        <span className="font-extrabold text-slate-800 text-sm">
-                          {m.lastReading !== null ? `${m.lastReading.toFixed(1)} kWh` : 'Belum Scan'}
+                return (
+                  <Card key={m.id} className="border-slate-200 hover:border-teal-300 transition">
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex justify-between items-start border-b pb-2">
+                        <div>
+                          <h3 className="font-bold text-slate-800 text-sm">{m.store_name}</h3>
+                          <p className="text-[11px] text-slate-500">
+                            PLN ID: <span className="font-mono text-slate-700">{m.meter_number}</span> • {m.power_va} VA
+                          </p>
+                        </div>
+                        <span className="text-[10px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-full font-bold border border-teal-200">
+                          Aktif
                         </span>
                       </div>
-                      <div className="bg-teal-50 p-2.5 rounded-xl">
-                        <span className="text-teal-700 block text-[10px] flex items-center gap-1">
-                          <Clock className="w-3 h-3" /> Pemakaian Rata-Rata
-                        </span>
-                        <span className="font-extrabold text-teal-900 text-sm">
-                          {m.hourlyRate.toFixed(2)} kWh/jam
-                        </span>
-                      </div>
-                    </div>
 
-                    {/* Proyeksi Harian, Mingguan, Bulanan */}
-                    <div className="bg-slate-100/70 p-2.5 rounded-xl grid grid-cols-3 gap-1 text-center text-[11px]">
-                      <div>
-                        <span className="text-slate-500 block text-[9px]">Sehari (24j)</span>
-                        <span className="font-bold text-slate-700">{m.dailyProjection.toFixed(1)} kWh</span>
+                      {/* Rata-Rata Per Jam & Sisa Meteran */}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-slate-50 p-2.5 rounded-xl">
+                          <span className="text-slate-500 block text-[10px]">Sisa Meteran</span>
+                          <span className="font-extrabold text-slate-800 text-sm">
+                            {m.lastReading !== null ? `${m.lastReading.toFixed(1)} kWh` : 'Belum Scan'}
+                          </span>
+                          {m.lastReading !== null && (
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              ~ Rp {Math.round(storeEstimatedRupiah).toLocaleString('id-ID')}
+                            </span>
+                          )}
+                        </div>
+                        <div className="bg-teal-50 p-2.5 rounded-xl">
+                          <span className="text-teal-700 block text-[10px] flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Pemakaian Rata-Rata
+                          </span>
+                          <span className="font-extrabold text-teal-900 text-sm">
+                            {m.hourlyRate.toFixed(2)} kWh/jam
+                          </span>
+                        </div>
                       </div>
-                      <div className="border-x border-slate-200">
-                        <span className="text-slate-500 block text-[9px]">Seminggu</span>
-                        <span className="font-bold text-slate-700">{m.weeklyProjection.toFixed(1)} kWh</span>
+
+                      {/* Proyeksi Harian, Mingguan, Bulanan */}
+                      <div className="bg-slate-100/70 p-2.5 rounded-xl grid grid-cols-3 gap-1 text-center text-[11px]">
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Sehari (24j)</span>
+                          <span className="font-bold text-slate-700">{m.dailyProjection.toFixed(1)} kWh</span>
+                        </div>
+                        <div className="border-x border-slate-200">
+                          <span className="text-slate-500 block text-[9px]">Seminggu</span>
+                          <span className="font-bold text-slate-700">{m.weeklyProjection.toFixed(1)} kWh</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[9px]">Sebulan (30h)</span>
+                          <span className="font-bold text-slate-700">{m.monthlyProjection.toFixed(1)} kWh</span>
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-slate-500 block text-[9px]">Sebulan (30h)</span>
-                        <span className="font-bold text-slate-700">{m.monthlyProjection.toFixed(1)} kWh</span>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
 
