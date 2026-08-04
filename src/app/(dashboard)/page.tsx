@@ -36,18 +36,13 @@ export default function DashboardPage() {
   const [daysLeft, setDaysLeft] = useState<number>(0);
 
   useEffect(() => {
-    // Check Active Session Toko di LocalStorage
+    // Jangan otomatis redirect berdasarkan localStorage — ambil data dulu
     const storedStoreId = localStorage.getItem('active_store_id');
-    setActiveStoreId(storedStoreId);
-
-    // Jika belum login / memilih toko, alihkan ke /login
-    if (!storedStoreId) {
-      router.push('/login');
-      return;
-    }
+    if (storedStoreId) setActiveStoreId(storedStoreId);
 
     fetchDashboardData();
-  }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -60,10 +55,25 @@ export default function DashboardPage() {
 
       if (metersError) throw metersError;
 
+      console.log('Fetched meters:', meters);
+
       if (!meters || meters.length === 0) {
         setMetersData([]);
         setLoading(false);
+        // Jika tidak ada toko, arahkan pengguna ke halaman tambah toko
+        // tapi beri sedikit delay supaya UI tidak langsung lompat
+        setTimeout(() => router.push('/toko/tambah'), 500);
         return;
+      }
+
+      // Jika tidak ada activeStoreId di localStorage, set yang pertama sebagai default
+      const storedStoreId = localStorage.getItem('active_store_id');
+      if (!storedStoreId) {
+        const first = meters[0];
+        localStorage.setItem('active_store_id', first.id);
+        localStorage.setItem('active_store_name', first.store_name || 'Toko');
+        setActiveStoreId(first.id);
+        console.log('No active_store_id found, defaulting to:', first.id);
       }
 
       // Hitung Tanggal Awal Bulan Ini
@@ -77,7 +87,7 @@ export default function DashboardPage() {
       // 2. Query bacaan untuk setiap toko
       for (const m of meters) {
         // Ambil bacaan paling terakhir
-        const { data: latest } = await supabase
+        const { data: latest, error: latestErr } = await supabase
           .from('meter_readings')
           .select('kwh')
           .eq('meter_id', m.id)
@@ -85,13 +95,19 @@ export default function DashboardPage() {
           .limit(1)
           .maybeSingle();
 
+        if (latestErr) console.warn(`Error fetching latest for ${m.id}:`, latestErr);
+
         // Ambil semua bacaan bulan ini
-        const { data: monthReadings } = await supabase
+        const { data: monthReadings, error: monthErr } = await supabase
           .from('meter_readings')
           .select('kwh')
           .eq('meter_id', m.id)
           .gte('created_at', firstDayOfMonth)
           .order('created_at', { ascending: true });
+
+        if (monthErr) console.warn(`Error fetching month readings for ${m.id}:`, monthErr);
+
+        console.log(`Meter ${m.id} - latest:`, latest, 'monthReadings:', monthReadings?.length);
 
         let storeMonthlyUsage = 0;
         if (monthReadings && monthReadings.length > 1) {
@@ -129,7 +145,7 @@ export default function DashboardPage() {
       setIntelligenceScore(score);
 
     } catch (err: any) {
-      console.error('Error fetching dashboard:', err.message);
+      console.error('Error fetching dashboard:', err?.message || err);
     } finally {
       setLoading(false);
     }
