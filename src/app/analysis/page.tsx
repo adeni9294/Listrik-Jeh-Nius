@@ -74,7 +74,7 @@ export default function AnalysisPage() {
       }
     } catch (err: any) {
       console.error('Gagal mengambil data analisis:', err.message);
-    } fontally {
+    } finally {
       setLoading(false);
     }
   };
