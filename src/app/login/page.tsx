@@ -14,6 +14,7 @@ import {
   CreditCard,
   Eye,
   EyeOff,
+  ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -21,7 +22,7 @@ export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [identifier, setIdentifier] = useState(''); // Mengakomodasi Kode Toko atau Nomor Meter
+  const [identifier, setIdentifier] = useState(''); // Mengakomodasi Kode Toko, Nama Toko, atau Nomor Meter
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -34,8 +35,9 @@ export default function LoginPage() {
 
     try {
       const cleanInput = identifier.trim();
+      const cleanPassword = password.trim();
 
-      if (!cleanInput || !password) {
+      if (!cleanInput || !cleanPassword) {
         throw new Error('Mohon isi semua kolom yang tersedia.');
       }
 
@@ -43,44 +45,44 @@ export default function LoginPage() {
       const { data: meters, error } = await supabase
         .from('meters')
         .select('*')
-        .or(`meter_number.ilike.%${cleanInput}%,store_name.ilike.%${cleanInput}%`);
+        .or(
+          `meter_number.ilike.%${cleanInput}%,store_name.ilike.%${cleanInput}%,name.ilike.%${cleanInput}%`
+        );
 
       if (error || !meters || meters.length === 0) {
-        throw new Error('Kode Toko atau Nomor Meter tidak ditemukan!');
+        throw new Error('Kode Toko, Nama Toko, atau Nomor Meter tidak ditemukan!');
       }
 
       // Ambil hasil pencocokan pertama
       const matchedMeter = meters[0];
 
-      // 2. Cek kecocokan Kata Sandi Toko
-      if (matchedMeter.password !== password.trim()) {
-        throw new Error('Kata Sandi Toko salah!');
+      // 2. Cek kecocokan Kata Sandi Toko / PIN
+      if (matchedMeter.password && matchedMeter.password.trim() !== cleanPassword) {
+        throw new Error('Kata Sandi Toko / PIN salah!');
       }
 
-      // 3. Simpan session toko aktif & role pengguna ke LocalStorage
+      // 3. Tentukan Peran Pengguna (Admin vs Staff)
+      const userRole = matchedMeter.role || 'staff';
+
+      // 4. Simpan Session Toko Aktif & Role Pengguna ke LocalStorage
       localStorage.setItem('active_store_id', matchedMeter.id);
       localStorage.setItem(
         'active_store_name',
         matchedMeter.store_name || matchedMeter.name || 'Toko'
       );
       localStorage.setItem('active_meter_number', matchedMeter.meter_number || '');
+      localStorage.setItem('user_role', userRole);
 
-      // Simpan role jika ada di database, jika tidak default ke 'staff'
-      if (matchedMeter.role) {
-        localStorage.setItem('user_role', matchedMeter.role);
-      } else {
-        localStorage.setItem('user_role', 'staff');
-      }
-
-      // Dispatch Custom Event agar komponen Navigasi/Header merespons perubahan toko secara real-time
+      // Dispatch Custom Event agar Header/Navigasi merespons perubahan toko secara real-time
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('store_changed'));
       }
 
-      // 4. Masuk ke Dashboard Utama
+      // 5. Masuk ke Dashboard Utama
       router.push('/');
       router.refresh();
     } catch (err: any) {
+      console.error('Login error:', err);
       setErrorMessage(err.message || 'Gagal masuk. Periksa kembali data Anda.');
     } finally {
       setIsSubmitting(false);
@@ -98,7 +100,7 @@ export default function LoginPage() {
             Masuk Listrik Jenius
           </CardTitle>
           <p className="text-xs text-slate-500">
-            Gunakan Kode Toko / Nomor Meter & Kata Sandi
+            Gunakan Kode Toko / ID Pelanggan PLN & Kata Sandi
           </p>
         </CardHeader>
 
@@ -126,7 +128,7 @@ export default function LoginPage() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                <Lock className="w-3.5 h-3.5 text-slate-400" /> Kata Sandi Toko
+                <Lock className="w-3.5 h-3.5 text-slate-400" /> Kata Sandi Toko / PIN
               </label>
               <div className="relative">
                 <input
@@ -157,7 +159,10 @@ export default function LoginPage() {
               className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl flex items-center justify-center gap-2 mt-2 shadow-sm transition"
             >
               {isSubmitting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Memverifikasi...
+                </>
               ) : (
                 <>
                   <LogIn className="w-4 h-4" /> Masuk ke Toko
