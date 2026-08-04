@@ -49,7 +49,7 @@ export default function ScanPage() {
         }
       } catch (err: any) {
         console.error('Gagal mengambil data toko:', err.message);
-      } finally {
+      } fontly {
         setIsLoadingMeters(false);
       }
     };
@@ -142,24 +142,17 @@ export default function ScanPage() {
       const payload: Record<string, any> = {
         kwh: finalKwh,
         confidence: isEditing ? 100 : validationResult.confidence,
+        reading_date: new Date().toISOString().split('T')[0], // Mengisi reading_date (YYYY-MM-DD)
+        reading_time: new Date().toTimeString().split(' ')[0], // Mengisi reading_time (HH:MM:SS)
         created_at: new Date().toISOString(),
       };
 
-      // Sisipkan meter_id & user_id jika tersedia
       if (selectedMeterId) payload.meter_id = selectedMeterId;
       if (user?.id) payload.user_id = user.id;
 
-// Cari bagian supabase.from('meter_readings').insert([...])
-const { error } = await supabase
-  .from('meter_readings')
-  .insert([
-    {
-      meter_id: selectedMeterId,
-      kwh: parseFloat(kwhResult),
-      reading_date: new Date().toISOString(), // <-- Tambahkan tanggal hari ini
-      // ... field lainnya jika ada
-    },
-  ]);
+      const { error } = await supabase
+        .from('meter_readings')
+        .insert([payload]);
 
       if (error) throw error;
 
