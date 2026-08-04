@@ -163,12 +163,10 @@ const handleSave = async () => {
 
       reading_date: now.toISOString().slice(0,10),
 
-      reading_time: now.toLocaleTimeString("id-ID",{
-          hour12:false,
-      }),
+ reading_time: now.toTimeString().split(' ')[0], 
 
-      created_at: now.toISOString(),
-    };
+  created_at: now.toISOString(),
+};
 
     // Insert dan ambil inserted row
     const { data: insertedRow, error: insertError } = await supabase
