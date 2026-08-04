@@ -7,6 +7,7 @@ import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut }
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { computeConsumption } from '@/lib/consumption';
 
 interface MeterWithReading {
   id: string;
@@ -15,6 +16,7 @@ interface MeterWithReading {
   power_va: number;
   lastReading: number | null;
   monthlyUsage: number;
+  perDay?: number;
 }
 
 export default function DashboardPage() {
@@ -89,7 +91,7 @@ export default function DashboardPage() {
         // Ambil bacaan paling terakhir
         const { data: latest, error: latestErr } = await supabase
           .from('meter_readings')
-          .select('kwh')
+          .select('kwh, created_at')
           .eq('meter_id', m.id)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -100,7 +102,7 @@ export default function DashboardPage() {
         // Ambil semua bacaan bulan ini
         const { data: monthReadings, error: monthErr } = await supabase
           .from('meter_readings')
-          .select('kwh')
+          .select('kwh, created_at')
           .eq('meter_id', m.id)
           .gte('created_at', firstDayOfMonth)
           .order('created_at', { ascending: true });
@@ -110,10 +112,15 @@ export default function DashboardPage() {
         console.log(`Meter ${m.id} - latest:`, latest, 'monthReadings:', monthReadings?.length);
 
         let storeMonthlyUsage = 0;
+        let storePerDay = 0;
+
         if (monthReadings && monthReadings.length > 1) {
-          const firstKwh = monthReadings[0].kwh;
-          const lastKwh = monthReadings[monthReadings.length - 1].kwh;
-          storeMonthlyUsage = Math.max(0, firstKwh - lastKwh);
+          const scans = monthReadings.map((r: any) => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }));
+          const summary = computeConsumption(scans);
+
+          // total usage this month (sum of positive deltas across valid intervals)
+          storeMonthlyUsage = summary.intervals.filter((i) => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0);
+          storePerDay = summary.kwhPerHourUsedForProjection * 24;
         }
 
         const lastVal = latest ? latest.kwh : 0;
@@ -127,6 +134,7 @@ export default function DashboardPage() {
           power_va: m.power_va || 1300,
           lastReading: latest ? latest.kwh : null,
           monthlyUsage: storeMonthlyUsage,
+          perDay: storePerDay,
         });
       }
 
@@ -134,10 +142,9 @@ export default function DashboardPage() {
       setTotalKwhMonth(accumKwhAllStores);
       setRemainingTokenKwh(accumLastReadings);
 
-      // Hitung Estimasi Hari Sisa Token (Rata-rata konsumsi 4 kWh / hari per toko)
-      const avgDailyUsagePerStore = 4;
-      const totalDailyUsage = meters.length * avgDailyUsagePerStore;
-      const estimatedDays = totalDailyUsage > 0 ? Math.round(accumLastReadings / totalDailyUsage) : 0;
+      // Hitung Estimasi Hari Sisa Token (gunakan per-day aktual dari setiap meter)
+      const totalDailyUsage = computedMeters.reduce((s, mm) => s + (mm.perDay || 0), 0);
+      const estimatedDays = totalDailyUsage > 0 ? Math.floor(accumLastReadings / totalDailyUsage) : 0;
       setDaysLeft(estimatedDays);
 
       // Metrik AI berdasarkan keaktifan pindaian
