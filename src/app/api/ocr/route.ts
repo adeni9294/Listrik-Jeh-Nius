@@ -1,26 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-function arrayBufferToBase64(arrayBuffer: ArrayBuffer): string {
-  if (typeof Buffer !== 'undefined' && typeof Buffer.from === 'function') {
-    return Buffer.from(arrayBuffer).toString('base64');
-  }
-
-  let binary = '';
-  const bytes = new Uint8Array(arrayBuffer);
-  const chunkSize = 0x8000; // 32KB
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode.apply(null, Array.from(chunk));
-  }
-
-  if (typeof btoa === 'function') {
-    return btoa(binary);
-  }
-
-  throw new Error('Tidak dapat mengonversi ArrayBuffer ke base64 di runtime ini');
-}
-
 export async function POST(req: NextRequest) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -41,24 +21,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Konversi file ke Buffer -> Base64
     const arrayBuffer = await file.arrayBuffer();
-    const base64Data = arrayBufferToBase64(arrayBuffer);
+    const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
-    let genAI: any;
-    try {
-      genAI = new (GoogleGenerativeAI as any)(apiKey);
-    } catch (e) {
-      genAI = new (GoogleGenerativeAI as any)({ apiKey });
-    }
-
-    const model = typeof genAI.getGenerativeModel === 'function'
-      ? genAI.getGenerativeModel({
-          model: 'gemini-3.5-flash',
-          generationConfig: {
-            responseMimeType: 'application/json',
-          },
-        })
-      : genAI;
+    // Inisialisasi SDK Gemini
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3.6-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    });
 
     // PROMPT DENGAN INSTRUKSI DESIMAL PLN
     const prompt = `
@@ -83,44 +57,21 @@ export async function POST(req: NextRequest) {
       - confidence: Estimasi tingkat kepastian pembacaan (0-100).
     `;
 
-    const payload = [
-      prompt,
-      {
-        inlineData: {
-          data: base64Data,
-          mimeType: (file as Blob).type || 'image/jpeg',
-        },
+    const imagePart = {
+      inlineData: {
+        data: base64Data,
+        mimeType: file.type || 'image/jpeg',
       },
-    ];
+    };
 
-    const result = await (typeof model.generateContent === 'function'
-      ? model.generateContent(payload)
-      : (model.generate ? model.generate(payload) : model));
+    const result = await model.generateContent([prompt, imagePart]);
+    const responseText = result.response.text();
 
-    if (!result) {
-      return NextResponse.json({ error: 'Tidak mendapatkan respons dari model.' }, { status: 502 });
-    }
-
-    let responseText = '';
-    if (result.response) {
-      const r = result.response;
-      if (typeof r.text === 'function') {
-        responseText = (await r.text()).trim();
-      } else if (typeof r === 'string') {
-        responseText = r.trim();
-      } else if ((r as any).outputText) {
-        responseText = String((r as any).outputText).trim();
-      } else {
-        responseText = JSON.stringify(r);
-      }
-    } else if (typeof result === 'string') {
-      responseText = result.trim();
-    } else {
-      try {
-        responseText = JSON.stringify(result);
-      } catch (e) {
-        responseText = String(result);
-      }
+    if (!responseText) {
+      return NextResponse.json(
+        { error: 'Tidak mendapatkan respons dari model.' },
+        { status: 502 }
+      );
     }
 
     // Parse JSON
@@ -129,12 +80,17 @@ export async function POST(req: NextRequest) {
       parsedData = JSON.parse(responseText);
     } catch (e) {
       console.error('Response dari model bukan JSON valid:', responseText);
-      return NextResponse.json({ error: 'Response dari model tidak valid JSON', rawResponse: responseText }, { status: 502 });
+      return NextResponse.json(
+        { error: 'Response dari model tidak valid JSON', rawResponse: responseText },
+        { status: 502 }
+      );
     }
 
-    // Normalisasi cleanValue
+    // Normalisasi cleanValue jika terbalik dikirimkan sebagai string
     if (parsedData && typeof parsedData.cleanValue === 'string') {
-      const num = parseFloat(parsedData.cleanValue.replace('-', '.').replace(/[^0-9.]/g, ''));
+      const num = parseFloat(
+        parsedData.cleanValue.replace('-', '.').replace(/[^0-9.]/g, '')
+      );
       parsedData.cleanValue = Number.isFinite(num) ? num : parsedData.cleanValue;
     }
 
