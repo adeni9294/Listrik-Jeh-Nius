@@ -13,7 +13,6 @@ import {
   BatteryCharging,
   Sparkles,
   Send,
-  Calculator,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { getTariffRate } from '@/lib/constants';
@@ -40,6 +39,7 @@ export default function AiPage() {
   const [hourlyKwh, setHourlyKwh] = useState<number>(0);
   const [daysRemaining, setDaysRemaining] = useState<number>(0);
   const [activeTariff, setActiveTariff] = useState<number>(1444.7);
+  const [activePowerVa, setActivePowerVa] = useState<number>(1300);
 
   // Status AI Health
   const [healthStatus, setHealthStatus] = useState<'normal' | 'warning' | 'critical'>('normal');
@@ -53,7 +53,7 @@ export default function AiPage() {
   const [messages, setMessages] = useState<{ sender: 'ai' | 'user'; text: string }[]>([
     {
       sender: 'ai',
-      text: 'Halo! Saya Asisten AI Listrik Jenius. Ada yang ingin Anda tanyakan terkait konsumsi listrik toko?',
+      text: 'Halo! Saya Asisten AI Kelistrikan Toko. Ada yang ingin Anda tanyakan seputar estimasi Watt alat, batas daya PLN, atau cara hemat listrik?',
     },
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
@@ -89,8 +89,10 @@ export default function AiPage() {
       }
 
       const activeMeterInfo = currentMeters.find((m) => m.id === targetMeterId);
-      const activePowerVa = activeMeterInfo?.power_va || 1300;
-      const currentTariffRate = getTariffRate(activePowerVa);
+      const powerVa = activeMeterInfo?.power_va || 1300;
+      setActivePowerVa(powerVa);
+
+      const currentTariffRate = getTariffRate(powerVa);
       setActiveTariff(currentTariffRate);
 
       const { data: readings } = await supabase
@@ -153,6 +155,7 @@ export default function AiPage() {
   const simulatedKwh = customAmount / (activeTariff || 1444.7);
   const simulatedDays = dailyKwh > 0 ? (simulatedKwh / dailyKwh).toFixed(1) : '0';
 
+  // --- ENGINE CHAT AI KELISTRIKAN PINTAR ---
   const handleSendMessage = () => {
     if (!inputPrompt.trim()) return;
 
@@ -161,14 +164,88 @@ export default function AiPage() {
     setInputPrompt('');
 
     setTimeout(() => {
-      let response = `Berdasarkan laju konsumsi ${hourlyKwh.toFixed(2)} kWh/jam, toko Anda memerlukan rata-rata ${dailyKwh.toFixed(1)} kWh per hari.`;
-      if (userText.toLowerCase().includes('hemat') || userText.toLowerCase().includes('boros')) {
-        response = 'Penyebab utama penggunaan tinggi biasanya berasal dari AC dan Showcase. Menaikkan suhu AC ke 24°C dapat menghemat hingga 15% energi harian.';
-      } else if (userText.toLowerCase().includes('token') || userText.toLowerCase().includes('beli')) {
-        response = `Diperkirakan token Rp ${recCost.toLocaleString('id-ID')} cukup untuk menjaga operasional toko aman selama 14 hari.`;
+      const q = userText.toLowerCase();
+      let response = '';
+
+      const maxSafeWatts = Math.round(activePowerVa * 0.8);
+      const storeName = meters.find((m) => m.id === selectedMeterId)?.store_name || 'Toko Ini';
+
+      // 1. REGEX ENGINE: Deteksi Input Watt, Jam, dan Jumlah Peralatan
+      const wattMatch = q.match(/(\d+)\s*(watt|w\b)/);
+      const hourMatch = q.match(/(\d+)\s*(jam|hours|h\b)/);
+      const qtyMatch = q.match(/(\d+)\s*(biji|buah|unit|pcs)/);
+
+      const detectedWatt = wattMatch ? parseInt(wattMatch[1]) : null;
+      const detectedHours = hourMatch ? parseInt(hourMatch[1]) : 24;
+      const detectedQty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+      if (detectedWatt) {
+        const totalWatt = detectedWatt * detectedQty;
+        const dailyKwhCalc = (totalWatt * detectedHours) / 1000;
+        const monthlyKwhCalc = dailyKwhCalc * 30;
+        const dailyCost = dailyKwhCalc * activeTariff;
+        const monthlyCost = monthlyKwhCalc * activeTariff;
+
+        const sharePercent = dailyKwh > 0 ? Math.min(100, Math.round((dailyKwhCalc / dailyKwh) * 100)) : 0;
+
+        response = `⚡ **Analisis Kelistrikan Peralatan (${storeName}):**\n\n` +
+          `• **Total Beban:** ${detectedQty}x ${detectedWatt} W = **${totalWatt} Watt**\n` +
+          `• **Konsumsi Alat:** ${dailyKwhCalc.toFixed(2)} kWh/hari (~Rp ${Math.round(dailyCost).toLocaleString('id-ID')}/hari)\n` +
+          `• **Proyeksi Bulanan:** ${monthlyKwhCalc.toFixed(1)} kWh (~Rp ${Math.round(monthlyCost).toLocaleString('id-ID')}/bulan)\n` +
+          `• **Kontribusi di Toko:** Menyerap **~${sharePercent}%** dari total beban scan harian (${dailyKwh.toFixed(1)} kWh/hari).\n\n` +
+          `🔌 **Evaluasi Kapasitas PLN (${activePowerVa} VA):**\n` +
+          `Batas aman penggunaan serentak toko Anda adalah **~${maxSafeWatts} Watt**.\n` +
+          (totalWatt > maxSafeWatts 
+            ? `⚠️ **Peringatan Overload:** Beban alat (${totalWatt} W) melampaui batas aman serentak MCB (${maxSafeWatts} W). Berisiko *trip/jepret* jika dinyalakan bersamaan!` 
+            : `✅ **Aman:** Beban masih di bawah batas maksimal MCB.`);
+      } 
+      // 2. KNOWLEDGE BASE BEBAN INDUKTIF (AC, Showcase, Kulkas)
+      else if (q.includes('showcase') || q.includes('kulkas') || q.includes('freezer')) {
+        const estWatts = 250;
+        const estKwhDay = (estWatts * 24) / 1000;
+        const estCostDay = estKwhDay * activeTariff;
+
+        response = `🥤 **Analisis Beban Induktif Showcase / Kulkas:**\n\n` +
+          `• **Karakteristik:** Menggunakan kompresor. Saat pertama dinyalakan, lonjakan awal (*starting current*) bisa naik **2x-3x lipat** dari watt normal.\n` +
+          `• **Estimasi Standar (~250W):** ${estKwhDay.toFixed(1)} kWh/hari (~Rp ${Math.round(estCostDay).toLocaleString('id-ID')}/hari).\n\n` +
+          `💡 **Tips Hemat:** Jarakkan belakang showcase minimal 15 cm dari dinding agar sirkulasi panas lancar, dan bersihkan debu kompresor sebulan sekali.`;
+      } 
+      else if (q.includes('ac') || q.includes('pendingin') || q.includes('suhu')) {
+        const estWatts = 800;
+        const estHours = 12;
+        const estKwhDay = (estWatts * estHours) / 1000;
+        const estCostDay = estKwhDay * activeTariff;
+
+        response = `❄️ **Analisis Beban AC Toko:**\n\n` +
+          `AC menyerap sekitar 40-50% dari total listrik toko. AC 1 PK (~${estWatts} Watt) beroperasi ${estHours} jam menyerap **${estKwhDay.toFixed(1)} kWh/hari** (~Rp ${Math.round(estCostDay).toLocaleString('id-ID')}/hari).\n\n` +
+          `💡 **Tips Hemat:** Naikkan suhu remote dari 18°C ke **23°C–24°C**. Setiap kenaikan 1°C menghemat sekitar 6-10% konsumsi listrik AC.`;
+      } 
+      // 3. KNOWLEDGE BASE KAPASITAS PLN & MCB (Jepret/Trip)
+      else if (q.includes('jepret') || q.includes('mcb') || q.includes('kapasitas') || q.includes('va')) {
+        response = `🔌 **Aturan Kapasitas MCB PLN (${activePowerVa} VA):**\n\n` +
+          `• **Kapasitas Nyata (Power Factor 0.8):** Mampu menampung beban serentak hingga **~${maxSafeWatts} Watt**.\n` +
+          `• **Penyebab Listrik Jepret:** Terjadi ketika total watt alat yang menyala bersamaan melampaui ${maxSafeWatts} Watt, atau terjadi lonjakan *starting current* kompresor AC/Showcase secara bersamaan.\n\n` +
+          `*Saran:* Nyalakan AC dan Showcase secara bertahap (jeda 2-3 menit) agar tidak bentrok lonjakan awal.`;
       }
+      // 4. KNOWLEDGE BASE TARIF & TOKEN PLN
+      else if (q.includes('pln') || q.includes('token') || q.includes('tarif') || q.includes('alarm')) {
+        response = `ℹ️ **Ketentuan Token Listrik PLN:**\n\n` +
+          `• **Daya Toko:** ${activePowerVa} VA (Tarif: Rp ${activeTariff}/kWh)\n` +
+          `• **Satuan Layar Meteran:** Angka pada meteran digital adalah **Sisa kWh**, bukan Rupiah.\n` +
+          `• **Rekomendasi Beli Token:** Berdasarkan laju ${hourlyKwh.toFixed(2)} kWh/jam, disarankan isi token sebesar **Rp ${recCost.toLocaleString('id-ID')}** untuk mengamankan 14 hari ke depan.`;
+      }
+      // 5. DEFAULT FALLBACK
+      else {
+        response = `Saya adalah Asisten AI Kelistrikan Toko (${storeName} - ${activePowerVa} VA).\n\n` +
+          `Anda bisa mengetik pertanyaan seperti:\n` +
+          `• *"Showcase 300 watt 24 jam"* \n` +
+          `• *"AC 750 watt 12 jam"* \n` +
+          `• *"Kenapa listrik toko sering jepret?"*\n` +
+          `• *"Cara hemat pemakaian showcase"*`;
+      }
+
       setMessages((prev) => [...prev, { sender: 'ai', text: response }]);
-    }, 800);
+    }, 600);
   };
 
   return (
@@ -336,7 +413,7 @@ export default function AiPage() {
                       className={`p-2.5 rounded-xl max-w-[85%] leading-relaxed ${
                         msg.sender === 'user'
                           ? 'bg-teal-700 text-white rounded-br-none'
-                          : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-xs'
+                          : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-xs whitespace-pre-line'
                       }`}
                     >
                       {msg.text}
@@ -348,7 +425,7 @@ export default function AiPage() {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Tanya AI (contoh: 'Kenapa toko boros?')..."
+                  placeholder="Tanya AI (contoh: 'Showcase 250 watt 24 jam')..."
                   value={inputPrompt}
                   onChange={(e) => setInputPrompt(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
