@@ -149,7 +149,17 @@ export default function ScanPage() {
       if (selectedMeterId) payload.meter_id = selectedMeterId;
       if (user?.id) payload.user_id = user.id;
 
-      const { error } = await supabase.from('meter_readings').insert([payload]);
+// Cari bagian supabase.from('meter_readings').insert([...])
+const { error } = await supabase
+  .from('meter_readings')
+  .insert([
+    {
+      meter_id: selectedMeterId,
+      kwh: parseFloat(kwhValue),
+      reading_date: new Date().toISOString(), // <-- Tambahkan tanggal hari ini
+      // ... field lainnya jika ada
+    },
+  ]);
 
       if (error) throw error;
 
