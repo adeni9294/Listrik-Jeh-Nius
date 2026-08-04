@@ -156,15 +156,28 @@ const handleSave = async () => {
     }
 
     // 4) susun payload; prioritaskan selectedMeterId, lalu activeStoreId
-    const payload: Record<string, any> = {
-      kwh: finalKwh,
-      meter_value: finalKwh,
-      confidence: isEditing ? 100 : validationResult.confidence,
-      reading_date: new Date().toISOString().split('T')[0],
-      reading_time: new Date().toTimeString().split(' ')[0],
-      created_at: new Date().toISOString(),
-      meter_id: selectedMeterId || activeStoreId,
-    };
+const now = new Date();
+
+const payload = {
+  meter_id: selectedMeterId || activeStoreId,
+
+  meter_value: finalKwh,
+  kwh: finalKwh,
+
+  confidence_score: isEditing
+    ? 100
+    : validationResult.confidence,
+
+  status: "success",
+
+  reading_date: now.toISOString().slice(0,10),
+
+  reading_time: now.toLocaleTimeString("id-ID",{
+      hour12:false,
+  }),
+
+  created_at: now.toISOString(),
+};
 
     // hanya sertakan user_id jika Supabase session ada (untuk RLS)
     if (userId) payload.user_id = userId;
