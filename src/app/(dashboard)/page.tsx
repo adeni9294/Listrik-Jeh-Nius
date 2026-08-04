@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock } from 'lucide-react';
+import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -20,8 +20,8 @@ interface MeterWithReading {
   weeklyProjection: number;// kWh / minggu
   monthlyProjection: number;// kWh / bulan
   lastScanIntervalHours: number;
-  confidence: number;      // Nilai tingkat keandalan scan OCR
-  totalScansCount: number; // Jumlah total pindaian toko
+  confidence: number;
+  todayScanCount: number;  // Jumlah pindaian khusus HARI INI
 }
 
 export default function DashboardPage() {
@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const [avgHourlyRateAll, setAvgHourlyRateAll] = useState<number>(0);
 
   const [intelligenceScore, setIntelligenceScore] = useState<number>(0);
-  const [dataQuality, setDataQuality] = useState<number>(0);
+  const [totalTodayScans, setTotalTodayScans] = useState<number>(0);
   const [daysLeft, setDaysLeft] = useState<number>(0);
 
   useEffect(() => {
@@ -78,11 +78,13 @@ export default function DashboardPage() {
       let accumLastReadings = 0;
       let accumHourlyRate = 0;
       let accumRupiah = 0;
-      let totalConfidenceSum = 0;
-      let totalReadingsCountSum = 0;
-      const computedMeters: MeterWithReading[] = [];
+      let globalTodayScanSum = 0;
 
-      // 2. Query data scan TERBARU & statistik confidence untuk setiap toko
+      const computedMeters: MeterWithReading[] = [];
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      // 2. Query data scan TERBARU & hitung scan HARI INI untuk tiap toko
       for (const m of meters) {
         // Ambil 2 pindaian terbaru untuk hitung laju pemakaian
         const { data: readings, error: readErr } = await supabase
@@ -94,11 +96,15 @@ export default function DashboardPage() {
 
         if (readErr) console.warn(`Error fetching readings for ${m.id}:`, readErr);
 
-        // Ambil agregat total pindaian & rata-rata confidence untuk Data Quality dinamis
-        const { data: allReadings } = await supabase
+        // Ambil pindaian khusus HARI INI
+        const { data: todayReadings } = await supabase
           .from('meter_readings')
-          .select('confidence')
-          .eq('meter_id', m.id);
+          .select('id')
+          .eq('meter_id', m.id)
+          .gte('created_at', startOfToday.toISOString());
+
+        const scanCountToday = todayReadings?.length || 0;
+        globalTodayScanSum += scanCountToday;
 
         let lastVal: number | null = null;
         let hourlyRate = 0;
@@ -106,19 +112,11 @@ export default function DashboardPage() {
         let weeklyProj = 0;
         let monthlyProj = 0;
         let intervalHours = 0;
-
-        // Hitung Rata-rata confidence per toko
-        const scanCount = allReadings?.length || 0;
-        let avgMeterConfidence = 85; // Default jika belum ada confidence
-        if (scanCount > 0) {
-          const sumConf = allReadings?.reduce((acc, r) => acc + Number(r.confidence || 85), 0) || 0;
-          avgMeterConfidence = Math.round(sumConf / scanCount);
-          totalConfidenceSum += sumConf;
-          totalReadingsCountSum += scanCount;
-        }
+        let avgMeterConfidence = 85;
 
         if (readings && readings.length > 0) {
           lastVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
+          avgMeterConfidence = Number(readings[0].confidence || 85);
 
           if (readings.length === 2) {
             const latest = {
@@ -130,14 +128,11 @@ export default function DashboardPage() {
               time: new Date(readings[1].created_at).getTime(),
             };
 
-            // Hitung selisih jam antar scan
             const diffMs = latest.time - previous.time;
             intervalHours = diffMs / (1000 * 60 * 60);
 
-            // Cek Normal Pemakaian vs Top-Up Token
             if (previous.kwh >= latest.kwh) {
               const consumedKwh = previous.kwh - latest.kwh;
-
               if (intervalHours >= 0.25) {
                 hourlyRate = consumedKwh / intervalHours;
               } else if (intervalHours > 0) {
@@ -174,26 +169,12 @@ export default function DashboardPage() {
           monthlyProjection: monthlyProj,
           lastScanIntervalHours: intervalHours,
           confidence: avgMeterConfidence,
-          totalScansCount: scanCount,
+          todayScanCount: scanCountToday,
         });
       }
 
       setMetersData(computedMeters);
-
-      // --- KALKULASI DATA QUALITY DINAMIS ---
-      const globalDataQuality = totalReadingsCountSum > 0
-        ? Math.min(100, Math.round(totalConfidenceSum / totalReadingsCountSum))
-        : 85;
-      setDataQuality(globalDataQuality);
-
-      // --- KALKULASI ENERGY INTELLIGENCE SCORE DINAMIS ---
-      // Didasarkan pada: Data Quality, Rutinitas Scan, dan Konsistensi Toko
-      let baseScore = globalDataQuality * 0.85; // 85% porsi dari akurasi OCR
-      if (totalReadingsCountSum >= 5) baseScore += 10; // Bonus jika pengguna rajin scan
-      else if (totalReadingsCountSum >= 2) baseScore += 5;
-
-      const computedScore = Math.min(99, Math.max(20, Math.round(baseScore)));
-      setIntelligenceScore(computedScore);
+      setTotalTodayScans(globalTodayScanSum);
 
       setRemainingTokenKwh(accumLastReadings);
       setTotalEstimatedRupiah(accumRupiah);
@@ -201,12 +182,22 @@ export default function DashboardPage() {
       const avgHourly = meters.length > 0 ? accumHourlyRate / meters.length : 0;
       setAvgHourlyRateAll(avgHourly);
 
-      // Estimasi Hari Sisa Token berdasarkan laju hourly rate total (24 jam)
       const totalDailyUsage = accumHourlyRate * 24;
       const estimatedDays = totalDailyUsage > 0
         ? Math.max(0, Math.floor(accumLastReadings / totalDailyUsage))
         : 0;
       setDaysLeft(estimatedDays);
+
+      // --- PERHITUNGAN SKOR EFISIENSI DINAMIS REALISTIS ---
+      let calculatedScore = 85;
+      if (estimatedDays <= 2) calculatedScore -= 30; // Penalti berat jika token mau habis
+      else if (estimatedDays <= 5) calculatedScore -= 15;
+
+      if (avgHourly > 15) calculatedScore -= 15; // Penalti jika penggunaan tinggi
+      if (globalTodayScanSum >= 2) calculatedScore += 10; // Bonus rutin scan
+
+      const finalScore = Math.min(99, Math.max(25, calculatedScore));
+      setIntelligenceScore(finalScore);
 
     } catch (err: any) {
       console.error('Error fetching dashboard:', err?.message || err);
@@ -246,7 +237,6 @@ export default function DashboardPage() {
     ? metersData
     : metersData.filter(m => m.id === selectedMeterId);
 
-  // Kalkulasi metrik dinamis saat filter toko dipilih
   const displayTokenKwh = selectedMeterId === 'all'
     ? remainingTokenKwh
     : filteredMeters[0]?.lastReading ?? 0;
@@ -263,13 +253,31 @@ export default function DashboardPage() {
     ? daysLeft
     : (displayHourlyRate * 24 > 0 ? Math.max(0, Math.floor(displayTokenKwh / (displayHourlyRate * 24))) : 0);
 
-  const displayDataQuality = selectedMeterId === 'all'
-    ? dataQuality
-    : filteredMeters[0]?.confidence ?? 85;
+  const displayTodayScans = selectedMeterId === 'all'
+    ? totalTodayScans
+    : filteredMeters[0]?.todayScanCount ?? 0;
 
-  const displayIntelligenceScore = selectedMeterId === 'all'
-    ? intelligenceScore
-    : Math.min(99, Math.max(20, Math.round((filteredMeters[0]?.confidence ?? 85) * 0.85 + (filteredMeters[0]?.totalScansCount >= 3 ? 10 : 5))));
+  // Penentuan Dinamis Skor & Label Per Toko
+  const getDisplayScore = () => {
+    let score = 85;
+    if (displayDaysLeft <= 2) score -= 30;
+    else if (displayDaysLeft <= 5) score -= 15;
+    if (displayHourlyRate > 15) score -= 15;
+    if (displayTodayScans >= 2) score += 10;
+    return Math.min(99, Math.max(25, score));
+  };
+
+  const currentDisplayScore = getDisplayScore();
+
+  // Helper untuk Label Scan Mode Berdasarkan Jumlah Scan Hari Ini
+  const getScanModeText = (count: number) => {
+    if (count === 0) return { label: '0 Scan (No Data)', color: 'text-rose-300' };
+    if (count === 1) return { label: '1 Scan (Basic Mode)', color: 'text-amber-300' };
+    if (count === 2) return { label: '2 Scan (Optimal Mode)', color: 'text-emerald-300' };
+    return { label: `${count} Scan (Advanced Mode)`, color: 'text-teal-200' };
+  };
+
+  const currentScanMode = getScanModeText(displayTodayScans);
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
@@ -319,7 +327,7 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Energy Intelligence Score Card (Dinamis) */}
+          {/* Energy Intelligence Score Card (Dinamis & Scan Mode Level) */}
           <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
             <CardContent className="p-5">
               <div className="flex justify-between items-start">
@@ -328,19 +336,30 @@ export default function DashboardPage() {
                     Energy Intelligence Score
                   </span>
                   <div className="text-4xl font-extrabold mt-1">
-                    {displayIntelligenceScore}<span className="text-lg font-normal text-emerald-300">/100</span>
+                    {currentDisplayScore}<span className="text-lg font-normal text-emerald-300">/100</span>
                   </div>
-                  <span className="inline-block mt-2 px-2.5 py-0.5 bg-emerald-500/20 text-emerald-200 text-xs font-semibold rounded-md border border-emerald-400/20">
-                    {displayIntelligenceScore >= 85 ? 'Excellent Efficiency' : 'Good Efficiency'}
+                  <span className={`inline-block mt-2 px-2.5 py-0.5 text-xs font-semibold rounded-md border ${
+                    currentDisplayScore >= 80 
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/20'
+                      : currentDisplayScore >= 60 
+                      ? 'bg-amber-500/20 text-amber-200 border-amber-400/20'
+                      : 'bg-rose-500/20 text-rose-200 border-rose-400/20'
+                  }`}>
+                    {currentDisplayScore >= 80 ? 'Excellent Efficiency' : currentDisplayScore >= 60 ? 'Need Attention' : 'Critical Status'}
                   </span>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase">
-                    Data Quality
+
+                {/* Widget Scan Mode Hari Ini */}
+                <div className="text-right bg-teal-950/50 p-2.5 rounded-xl border border-teal-700/40">
+                  <span className="text-[9px] font-bold tracking-widest text-teal-300 uppercase block">
+                    Status Scan Hari Ini
                   </span>
-                  <div className="text-2xl font-extrabold text-white mt-1">
-                    {displayDataQuality}%
+                  <div className={`text-xs font-extrabold mt-1 ${currentScanMode.color}`}>
+                    {currentScanMode.label}
                   </div>
+                  <span className="text-[9px] text-teal-200 block mt-0.5">
+                    {displayTodayScans === 0 ? 'Belum scan hari ini' : `${displayTodayScans}x Pindaian Sukses`}
+                  </span>
                 </div>
               </div>
             </CardContent>
@@ -363,13 +382,13 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className="bg-slate-50 border-slate-200">
+            <Card className={`border-slate-200 ${displayDaysLeft <= 2 ? 'bg-rose-50/60 border-rose-200' : 'bg-slate-50'}`}>
               <CardContent className="p-4">
-                <div className="flex items-center space-x-2 text-teal-600 mb-1">
-                  <TrendingDown className="w-4 h-4" />
+                <div className={`flex items-center space-x-2 mb-1 ${displayDaysLeft <= 2 ? 'text-rose-600' : 'text-teal-600'}`}>
+                  {displayDaysLeft <= 2 ? <AlertTriangle className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                   <span className="text-xs font-semibold">Estimasi Habis</span>
                 </div>
-                <div className="text-xl font-bold text-slate-800">
+                <div className={`text-xl font-bold ${displayDaysLeft <= 2 ? 'text-rose-700' : 'text-slate-800'}`}>
                   {displayDaysLeft} <span className="text-xs font-normal">Hari Lagi</span>
                 </div>
                 <p className="text-[10px] text-slate-500 mt-1">
@@ -491,8 +510,7 @@ export default function DashboardPage() {
                 <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
               </p>
               <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
-                💡 <strong>Rekomendasi Gemini AI:</strong> Isi ulang token disarankan ketika sisa token berada di bawah{' '}
-                <strong>15 kWh</strong> untuk mencegah mati listrik mendadak di jam operasional toko.
+                💡 <strong>Rekomendasi Gemini AI:</strong> Lakukan pindaian minimal 2x sehari (pagi & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang lebih presisi.
               </div>
             </CardContent>
           </Card>
