@@ -17,7 +17,9 @@ export default function AIPage() {
 
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
-  const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+  const [selectedMeterId, setSelectedMeterId] = useState<string>(
+    typeof window !== 'undefined' ? (localStorage.getItem('active_store_id') || 'all') : 'all'
+  );
 
   // Dynamic AI State Metrics
   const [totalRemainingKwh, setTotalRemainingKwh] = useState<number>(0);
