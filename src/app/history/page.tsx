@@ -2,7 +2,17 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { RefreshCw, Calendar, Clock, Zap, Store } from 'lucide-react';
+import {
+  RefreshCw,
+  Calendar,
+  Clock,
+  Zap,
+  Store,
+  X,
+  Eye,
+  TrendingDown,
+  ArrowRight,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface TableReading {
@@ -11,6 +21,7 @@ interface TableReading {
   store_name: string;
   meter_number: string;
   kwh_value: number;
+  consumption?: number | null; // Selisih pemakaian dari scan sebelumnya
   image_url?: string;
   created_at: string;
 }
@@ -20,8 +31,17 @@ export default function HistoryPage() {
 
   const [loading, setLoading] = useState(true);
   const [readings, setReadings] = useState<TableReading[]>([]);
-  const [metersMap, setMetersMap] = useState<Record<string, { store_name: string; meter_number: string }>>({});
+  const [metersMap, setMetersMap] = useState<
+    Record<string, { store_name: string; meter_number: string }>
+  >({});
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+
+  // State untuk modal preview foto
+  const [activePhoto, setActivePhoto] = useState<{
+    url: string;
+    title: string;
+    date: string;
+  } | null>(null);
 
   useEffect(() => {
     initHistory();
@@ -31,7 +51,7 @@ export default function HistoryPage() {
   const initHistory = async () => {
     setLoading(true);
     try {
-      // 1. Ambil data Toko untuk Map ID -> Store Name (Menghindari Error JOIN Foreign Key)
+      // 1. Ambil data Toko untuk Map ID -> Store Name
       const { data: metersData } = await supabase
         .from('meters')
         .select('id, store_name, meter_number');
@@ -54,23 +74,44 @@ export default function HistoryPage() {
         query = query.eq('meter_id', selectedMeterId);
       }
 
-      let { data: readingsData, error } = await query.order('created_at', { ascending: false });
+      let { data: readingsData, error } = await query.order('created_at', {
+        ascending: false,
+      });
 
       // Fallback jika nama tabelnya di DB adalah 'readings'
       if (error || !readingsData) {
-        const fallbackRes = await supabase.from('readings').select('*').order('created_at', { ascending: false });
+        const fallbackRes = await supabase
+          .from('readings')
+          .select('*')
+          .order('created_at', { ascending: false });
         readingsData = fallbackRes.data || [];
       }
 
       if (readingsData) {
-        const formatted: TableReading[] = readingsData.map((item: any) => {
-          const storeInfo = map[item.meter_id] || { store_name: 'Toko', meter_number: '-' };
+        const formatted: TableReading[] = readingsData.map((item: any, index: number) => {
+          const storeInfo = map[item.meter_id] || {
+            store_name: 'Toko',
+            meter_number: '-',
+          };
+          const currentKwh = Number(item.meter_value ?? item.kwh ?? item.value ?? 0);
+
+          // Hitung konsumsi energi berdasarkan data pindaian sebelumnya (jika ada pada toko yang sama)
+          let consumption: number | null = null;
+          const prevReading = readingsData.slice(index + 1).find((r: any) => r.meter_id === item.meter_id);
+          if (prevReading) {
+            const prevKwh = Number(prevReading.meter_value ?? prevReading.kwh ?? prevReading.value ?? 0);
+            if (prevKwh >= currentKwh) {
+              consumption = prevKwh - currentKwh;
+            }
+          }
+
           return {
             id: item.id,
             meter_id: item.meter_id,
             store_name: storeInfo.store_name,
             meter_number: storeInfo.meter_number,
-            kwh_value: Number(item.meter_value ?? item.kwh ?? item.value ?? 0),
+            kwh_value: currentKwh,
+            consumption,
             image_url: item.image_url || item.photo_url || null,
             created_at: item.created_at,
           };
@@ -80,7 +121,7 @@ export default function HistoryPage() {
       }
     } catch (err: any) {
       console.error('Gagal mengambil riwayat:', err?.message || err);
-    } finally {
+    } fontally {
       setLoading(false);
     }
   };
@@ -115,14 +156,14 @@ export default function HistoryPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Riwayat Pembacaan</h1>
-          <p className="text-xs text-slate-500">Tabel log pindaian & bukti foto meteran</p>
+          <p className="text-xs text-slate-500">Log pindaian & bukti foto meteran</p>
         </div>
 
         {meterOptions.length > 0 && (
           <select
             value={selectedMeterId}
             onChange={(e) => setSelectedMeterId(e.target.value)}
-            className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500"
+            className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 outline-none"
           >
             <option value="all">Semua Toko ({meterOptions.length})</option>
             {meterOptions.map((m) => (
@@ -137,7 +178,7 @@ export default function HistoryPage() {
       {loading ? (
         <div className="flex justify-center items-center py-12 text-slate-400 gap-2">
           <RefreshCw className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Memuat tabel riwayat...</span>
+          <span className="text-sm font-medium">Memuat tabel riwayat...</span>
         </div>
       ) : (
         <Card className="border-slate-200 shadow-sm overflow-hidden">
@@ -148,7 +189,7 @@ export default function HistoryPage() {
                   <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                     <th className="py-2.5 px-3">Waktu Scan</th>
                     <th className="py-2.5 px-3">Toko</th>
-                    <th className="py-2.5 px-3 text-right">Sisa Meteran</th>
+                    <th className="py-2.5 px-3 text-right">Sisa / Pemakaian</th>
                     <th className="py-2.5 px-3 text-center">Foto</th>
                   </tr>
                 </thead>
@@ -178,35 +219,49 @@ export default function HistoryPage() {
                         <td className="py-2.5 px-3">
                           <div className="font-bold text-slate-800 flex items-center gap-1">
                             <Store className="w-3 h-3 text-teal-600 shrink-0" />
-                            <span className="truncate max-w-[100px]">{row.store_name}</span>
+                            <span className="truncate max-w-[90px]">{row.store_name}</span>
                           </div>
                           <div className="text-[10px] text-slate-400 font-mono">{row.meter_number}</div>
                         </td>
 
-                        {/* Sisa Meteran (kWh) */}
+                        {/* Sisa & Konsumsi kWh */}
                         <td className="py-2.5 px-3 text-right whitespace-nowrap">
                           <div className="font-extrabold text-slate-800 inline-flex items-center gap-0.5">
                             <Zap className="w-3 h-3 fill-amber-500 text-amber-500" />
-                            {row.kwh_value.toFixed(1)}
+                            {row.kwh_value.toFixed(1)} <span className="text-[10px] text-slate-400 font-normal">kWh</span>
                           </div>
-                          <span className="text-[10px] text-slate-400 block">kWh</span>
+
+                          {row.consumption !== undefined && row.consumption !== null && (
+                            <div className="text-[10px] font-semibold text-rose-600 flex items-center justify-end gap-0.5 mt-0.5">
+                              <TrendingDown className="w-2.5 h-2.5" />
+                              <span>-{row.consumption.toFixed(1)} kWh</span>
+                            </div>
+                          )}
                         </td>
 
-                        {/* Foto Thumbnail */}
+                        {/* Foto Thumbnail & Lightbox Trigger */}
                         <td className="py-2.5 px-3 text-center">
                           {row.image_url ? (
-                            <a
-                              href={row.image_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-block"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActivePhoto({
+                                  url: row.image_url!,
+                                  title: row.store_name,
+                                  date: `${formatDate(row.created_at)} ${formatTime(row.created_at)}`,
+                                })
+                              }
+                              className="relative group inline-block focus:outline-none"
                             >
                               <img
                                 src={row.image_url}
                                 alt="Bukti"
-                                className="w-8 h-8 object-cover rounded border border-slate-200 hover:scale-110 transition mx-auto"
+                                className="w-8 h-8 object-cover rounded border border-slate-200 group-hover:opacity-80 transition mx-auto"
                               />
-                            </a>
+                              <div className="absolute inset-0 bg-black/30 rounded opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <Eye className="w-3.5 h-3.5 text-white" />
+                              </div>
+                            </button>
                           ) : (
                             <span className="text-[10px] text-slate-300 italic">-</span>
                           )}
@@ -219,6 +274,43 @@ export default function HistoryPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* MODAL LIGHTBOX PHOTO PREVIEW */}
+      {activePhoto && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl space-y-3 p-4 relative">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">{activePhoto.title}</h3>
+                <p className="text-[11px] text-slate-400">{activePhoto.date}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePhoto(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="relative rounded-xl overflow-hidden bg-slate-900 aspect-square flex items-center justify-center">
+              <img
+                src={activePhoto.url}
+                alt="Bukti Foto Full"
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActivePhoto(null)}
+              className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold transition"
+            >
+              Tutup Preview
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
