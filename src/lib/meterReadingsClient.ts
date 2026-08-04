@@ -167,8 +167,8 @@ export function computeDailyUsage(
   const previous = readings[1];
 
   const usage =
-    Number(latest.kwh) -
-    Number(previous.kwh);
+    Number(previous.kwh) -
+    Number(latest.kwh);
 
   return usage > 0 ? usage : 0;
 }
@@ -185,8 +185,8 @@ export function getTotalUsage(
 
   for (let i = 0; i < readings.length - 1; i++) {
     const diff =
-      readings[i].kwh -
-      readings[i + 1].kwh;
+      readings[i + 1].kwh -
+      readings[i].kwh;
 
     if (diff > 0) total += diff;
   }
