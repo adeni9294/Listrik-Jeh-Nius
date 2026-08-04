@@ -50,7 +50,7 @@ export default function DashboardPage() {
       // 1. Ambil semua toko milik user
       const { data: meters, error: metersError } = await supabase
         .from('meters')
-        .select('*')
+        .select('id, name, store_name, meter_number, power_va, created_at')
         .order('created_at', { ascending: false });
 
       if (metersError) throw metersError;
@@ -113,7 +113,7 @@ export default function DashboardPage() {
         if (monthReadings && monthReadings.length > 1) {
           const firstKwh = monthReadings[0].kwh;
           const lastKwh = monthReadings[monthReadings.length - 1].kwh;
-          storeMonthlyUsage = Math.max(0, lastKwh - firstKwh);
+          storeMonthlyUsage = Math.max(0, firstKwh - lastKwh);
         }
 
         const lastVal = latest ? latest.kwh : 0;
