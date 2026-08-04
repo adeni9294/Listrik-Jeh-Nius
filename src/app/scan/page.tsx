@@ -46,7 +46,9 @@ export default function ScanPage() {
 
         if (data && data.length > 0) {
           setMeters(data);
-          setSelectedMeterId(data[0].id); // Set toko pertama sebagai default
+          const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
+          const activeExists = activeStoreId && data.some((m) => m.id === activeStoreId);
+          setSelectedMeterId(activeExists ? activeStoreId! : data[0].id); // Prioritaskan toko yang sedang login
         }
       } catch (err: any) {
         console.error('Gagal mengambil data toko:', err.message);
@@ -135,54 +137,40 @@ const handleSave = async () => {
 
   setIsSaving(true);
   try {
-    // 1) coba ambil user Supabase (jika tersedia)
-    let userId: string | undefined = undefined;
-    try {
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      if (userErr) console.warn('getUser error', userErr);
-      userId = userData?.user?.id;
-    } catch (e) {
-      console.warn('Supabase getUser failed:', e);
-    }
-
-    // 2) fallback: ambil active_store_id dari localStorage (login lokal)
+    // Ambil ID toko aktif dari localStorage (hasil login password toko / tambah toko)
     const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
+    const meterId = selectedMeterId || activeStoreId;
 
-    // 3) jika keduanya tidak ada -> minta login
-    if (!userId && !activeStoreId) {
+    if (!meterId) {
       alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
       router.push('/login');
       return;
     }
 
-    // 4) susun payload; prioritaskan selectedMeterId, lalu activeStoreId
-const now = new Date();
+    const now = new Date();
 
-const payload = {
-  meter_id: selectedMeterId || activeStoreId,
+    const payload = {
+      meter_id: meterId,
 
-  meter_value: finalKwh,
-  kwh: finalKwh,
+      meter_value: finalKwh,
+      kwh: finalKwh,
 
-  confidence_score: isEditing
-    ? 100
-    : validationResult.confidence,
+      confidence_score: isEditing
+        ? 100
+        : validationResult.confidence,
 
-  status: "success",
+      status: "success",
 
-  reading_date: now.toISOString().slice(0,10),
+      reading_date: now.toISOString().slice(0,10),
 
-  reading_time: now.toLocaleTimeString("id-ID",{
-      hour12:false,
-  }),
+      reading_time: now.toLocaleTimeString("id-ID",{
+          hour12:false,
+      }),
 
-  created_at: now.toISOString(),
-};
+      created_at: now.toISOString(),
+    };
 
-    // hanya sertakan user_id jika Supabase session ada (untuk RLS)
-    if (userId) payload.user_id = userId;
-
-    // 5) insert dan ambil inserted row
+    // Insert dan ambil inserted row
     const { data: insertedRow, error: insertError } = await supabase
       .from('meter_readings')
       .insert([payload])
