@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock, AlertTriangle } from 'lucide-react';
+import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -30,6 +30,7 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>('staff');
 
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
@@ -43,20 +44,32 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
+    const storedRole = localStorage.getItem('user_role') || 'staff';
+    
     if (storedStoreId) setActiveStoreId(storedStoreId);
+    setUserRole(storedRole);
 
-    fetchDashboardData();
+    fetchDashboardData(storedRole, storedStoreId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (roleParam?: string, storeIdParam?: string | null) => {
     setLoading(true);
     try {
-      // 1. Ambil daftar toko
-      const { data: meters, error: metersError } = await supabase
+      const currentRole = roleParam ?? (localStorage.getItem('user_role') || 'staff');
+      const currentStoreId = storeIdParam ?? localStorage.getItem('active_store_id');
+
+      // 1. Ambil daftar toko dengan filter RBAC
+      let query = supabase
         .from('meters')
-        .select('id, name, store_name, meter_number, power_va, created_at')
-        .order('created_at', { ascending: false });
+        .select('id, name, store_name, meter_number, power_va, created_at, role');
+
+      // BUKAN ADMIN: Kunci query hanya ke toko miliknya sendiri
+      if (currentRole !== 'admin' && currentStoreId) {
+        query = query.eq('id', currentStoreId);
+      }
+
+      const { data: meters, error: metersError } = await query.order('created_at', { ascending: false });
 
       if (metersError) throw metersError;
 
@@ -67,8 +80,12 @@ export default function DashboardPage() {
         return;
       }
 
-      const storedStoreId = localStorage.getItem('active_store_id');
-      if (!storedStoreId) {
+      // Jika role staff, paksa selector toko ke tokonya saja (bukan 'all')
+      if (currentRole !== 'admin') {
+        setSelectedMeterId(meters[0].id);
+      }
+
+      if (!currentStoreId) {
         const first = meters[0];
         localStorage.setItem('active_store_id', first.id);
         localStorage.setItem('active_store_name', first.store_name || 'Toko');
@@ -86,7 +103,6 @@ export default function DashboardPage() {
 
       // 2. Query data scan TERBARU & hitung scan HARI INI untuk tiap toko
       for (const m of meters) {
-        // Ambil 2 pindaian terbaru untuk hitung laju pemakaian
         const { data: readings, error: readErr } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
@@ -96,7 +112,6 @@ export default function DashboardPage() {
 
         if (readErr) console.warn(`Error fetching readings for ${m.id}:`, readErr);
 
-        // Ambil pindaian khusus HARI INI
         const { data: todayReadings } = await supabase
           .from('meter_readings')
           .select('id')
@@ -188,13 +203,12 @@ export default function DashboardPage() {
         : 0;
       setDaysLeft(estimatedDays);
 
-      // --- PERHITUNGAN SKOR EFISIENSI DINAMIS REALISTIS ---
       let calculatedScore = 85;
-      if (estimatedDays <= 2) calculatedScore -= 30; // Penalti berat jika token mau habis
+      if (estimatedDays <= 2) calculatedScore -= 30;
       else if (estimatedDays <= 5) calculatedScore -= 15;
 
-      if (avgHourly > 15) calculatedScore -= 15; // Penalti jika penggunaan tinggi
-      if (globalTodayScanSum >= 2) calculatedScore += 10; // Bonus rutin scan
+      if (avgHourly > 15) calculatedScore -= 15;
+      if (globalTodayScanSum >= 2) calculatedScore += 10;
 
       const finalScore = Math.min(99, Math.max(25, calculatedScore));
       setIntelligenceScore(finalScore);
@@ -230,6 +244,7 @@ export default function DashboardPage() {
     localStorage.removeItem('active_store_id');
     localStorage.removeItem('active_store_name');
     localStorage.removeItem('active_meter_number');
+    localStorage.removeItem('user_role');
     router.push('/login');
   };
 
@@ -257,7 +272,6 @@ export default function DashboardPage() {
     ? totalTodayScans
     : filteredMeters[0]?.todayScanCount ?? 0;
 
-  // Penentuan Dinamis Skor & Label Per Toko
   const getDisplayScore = () => {
     let score = 85;
     if (displayDaysLeft <= 2) score -= 30;
@@ -269,7 +283,6 @@ export default function DashboardPage() {
 
   const currentDisplayScore = getDisplayScore();
 
-  // Helper untuk Label Scan Mode Berdasarkan Jumlah Scan Hari Ini
   const getScanModeText = (count: number) => {
     if (count === 0) return { label: '0 Scan (No Data)', color: 'text-rose-300' };
     if (count === 1) return { label: '1 Scan (Basic Mode)', color: 'text-amber-300' };
@@ -284,7 +297,14 @@ export default function DashboardPage() {
       {/* Header Info */}
       <div className="flex justify-between items-center gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Halo, Pengelola Toko 👋</h1>
+          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-1.5">
+            Halo, Pengelola Toko 👋
+            {userRole === 'admin' && (
+              <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-300 flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" /> Admin
+              </span>
+            )}
+          </h1>
           <p className="text-xs text-slate-500">
             Monitoring: <span className="font-semibold text-teal-700">{metersData.length} Toko Terdaftar</span>
           </p>
@@ -327,7 +347,7 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {/* Energy Intelligence Score Card (Dinamis & Scan Mode Level) */}
+          {/* Energy Intelligence Score Card */}
           <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
             <CardContent className="p-5">
               <div className="flex justify-between items-start">
@@ -349,7 +369,6 @@ export default function DashboardPage() {
                   </span>
                 </div>
 
-                {/* Widget Scan Mode Hari Ini */}
                 <div className="text-right bg-teal-950/50 p-2.5 rounded-xl border border-teal-700/40">
                   <span className="text-[9px] font-bold tracking-widest text-teal-300 uppercase block">
                     Status Scan Hari Ini
@@ -398,7 +417,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Selector Toko */}
+          {/* Selector Toko (Sesuai Hak Akses Role) */}
           {metersData.length > 0 && (
             <div className="flex items-center justify-between pt-1">
               <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
@@ -409,7 +428,10 @@ export default function DashboardPage() {
                 onChange={(e) => setSelectedMeterId(e.target.value)}
                 className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm"
               >
-                <option value="all">Semua Toko ({metersData.length})</option>
+                {/* Opsi 'Semua Toko' HANYA muncul untuk Admin */}
+                {userRole === 'admin' && (
+                  <option value="all">Semua Toko ({metersData.length})</option>
+                )}
                 {metersData.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.store_name}
@@ -452,7 +474,6 @@ export default function DashboardPage() {
                         </span>
                       </div>
 
-                      {/* Rata-Rata Per Jam & Sisa Meteran */}
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         <div className="bg-slate-50 p-2.5 rounded-xl">
                           <span className="text-slate-500 block text-[10px]">Sisa Meteran</span>
@@ -475,7 +496,6 @@ export default function DashboardPage() {
                         </div>
                       </div>
 
-                      {/* Proyeksi Harian, Mingguan, Bulanan */}
                       <div className="bg-slate-100/70 p-2.5 rounded-xl grid grid-cols-3 gap-1 text-center text-[11px]">
                         <div>
                           <span className="text-slate-500 block text-[9px]">Sehari (24j)</span>
