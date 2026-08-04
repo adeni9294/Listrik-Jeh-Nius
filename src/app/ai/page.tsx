@@ -3,9 +3,20 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Cpu, RefreshCw, AlertTriangle, CheckCircle2, ShoppingBag, ExternalLink, BatteryCharging } from 'lucide-react';
+import {
+  Cpu,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  ShoppingBag,
+  ExternalLink,
+  BatteryCharging,
+  Sparkles,
+  Send,
+  Calculator,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { getTariffRate, TARIF_PLN } from '@/lib/constants';
+import { getTariffRate } from '@/lib/constants';
 
 interface Meter {
   id: string;
@@ -20,7 +31,7 @@ export default function AiPage() {
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>(
-    typeof window !== 'undefined' ? (localStorage.getItem('active_store_id') || 'all') : 'all'
+    typeof window !== 'undefined' ? localStorage.getItem('active_store_id') || 'all' : 'all'
   );
 
   // Metrik Terintegrasi
@@ -28,13 +39,24 @@ export default function AiPage() {
   const [dailyKwh, setDailyKwh] = useState<number>(0);
   const [hourlyKwh, setHourlyKwh] = useState<number>(0);
   const [daysRemaining, setDaysRemaining] = useState<number>(0);
+  const [activeTariff, setActiveTariff] = useState<number>(1444.7);
 
   // Status AI Health
   const [healthStatus, setHealthStatus] = useState<'normal' | 'warning' | 'critical'>('normal');
 
-  // Rekomendasi Token AI
+  // Rekomendasi Token AI & Simulator
   const [recCost, setRecCost] = useState<number>(0);
   const [recKwh, setRecKwh] = useState<number>(0);
+  const [customAmount, setCustomAmount] = useState<number>(500000);
+
+  // Chat AI State
+  const [messages, setMessages] = useState<{ sender: 'ai' | 'user'; text: string }[]>([
+    {
+      sender: 'ai',
+      text: 'Halo! Saya Asisten AI Listrik Jenius. Ada yang ingin Anda tanyakan terkait konsumsi listrik toko?',
+    },
+  ]);
+  const [inputPrompt, setInputPrompt] = useState('');
 
   useEffect(() => {
     fetchAiInsight();
@@ -44,7 +66,6 @@ export default function AiPage() {
   const fetchAiInsight = async () => {
     setLoading(true);
     try {
-      // 1. Ambil daftar toko jika belum terisi
       let currentMeters = meters;
       if (currentMeters.length === 0) {
         const { data: metersData } = await supabase
@@ -56,7 +77,6 @@ export default function AiPage() {
         }
       }
 
-      // 2. Tentukan toko yang dievaluasi
       let targetMeterId = selectedMeterId;
       if (selectedMeterId === 'all') {
         const { data: firstMeter } = await supabase.from('meters').select('id').limit(1).single();
@@ -68,12 +88,11 @@ export default function AiPage() {
         return;
       }
 
-      // Ambil data detail meteran target untuk mengetahui power_va
       const activeMeterInfo = currentMeters.find((m) => m.id === targetMeterId);
       const activePowerVa = activeMeterInfo?.power_va || 1300;
       const currentTariffRate = getTariffRate(activePowerVa);
+      setActiveTariff(currentTariffRate);
 
-      // 3. Ambil 2 pindaian terakhir untuk menghitung laju riil
       const { data: readings } = await supabase
         .from('meter_readings')
         .select('kwh, meter_value, created_at')
@@ -99,30 +118,26 @@ export default function AiPage() {
             setHourlyKwh(ratePerHour);
             setDailyKwh(calculatedDaily);
 
-            // Hitung Sisa Hari (Sisa kWh / Pemakaian per hari)
             if (calculatedDaily > 0) {
               const daysLeft = latestReading / calculatedDaily;
               setDaysRemaining(Number(daysLeft.toFixed(1)));
 
-              // Tentukan Health Status
               if (daysLeft < 2) {
                 setHealthStatus('critical');
-              } else if (ratePerHour > 15) { // Contoh ambang batas lonjakan tinggi
+              } else if (ratePerHour > 15) {
                 setHealthStatus('warning');
               } else {
                 setHealthStatus('normal');
               }
 
-              // Hitung Rekomendasi Token AI (Untuk Kebutuhan 14 Hari Operasional Toko)
               const neededKwhFor14Days = calculatedDaily * 14;
               const rawCost = neededKwhFor14Days * currentTariffRate;
-
-              // Pembulatan ke kelipatan Rp 100.000 terdekat
               const roundedCost = Math.max(Math.ceil(rawCost / 100000) * 100000, 100000);
               const resultingKwh = roundedCost / currentTariffRate;
 
               setRecCost(roundedCost);
               setRecKwh(resultingKwh);
+              setCustomAmount(roundedCost);
             }
           }
         }
@@ -132,6 +147,28 @@ export default function AiPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Kalkulasi Simulator Custom Token
+  const simulatedKwh = customAmount / (activeTariff || 1444.7);
+  const simulatedDays = dailyKwh > 0 ? (simulatedKwh / dailyKwh).toFixed(1) : '0';
+
+  const handleSendMessage = () => {
+    if (!inputPrompt.trim()) return;
+
+    const userText = inputPrompt;
+    setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
+    setInputPrompt('');
+
+    setTimeout(() => {
+      let response = `Berdasarkan laju konsumsi ${hourlyKwh.toFixed(2)} kWh/jam, toko Anda memerlukan rata-rata ${dailyKwh.toFixed(1)} kWh per hari.`;
+      if (userText.toLowerCase().includes('hemat') || userText.toLowerCase().includes('boros')) {
+        response = 'Penyebab utama penggunaan tinggi biasanya berasal dari AC dan Showcase. Menaikkan suhu AC ke 24°C dapat menghemat hingga 15% energi harian.';
+      } else if (userText.toLowerCase().includes('token') || userText.toLowerCase().includes('beli')) {
+        response = `Diperkirakan token Rp ${recCost.toLocaleString('id-ID')} cukup untuk menjaga operasional toko aman selama 14 hari.`;
+      }
+      setMessages((prev) => [...prev, { sender: 'ai', text: response }]);
+    }, 800);
   };
 
   return (
@@ -204,39 +241,63 @@ export default function AiPage() {
             </CardContent>
           </Card>
 
-          {/* Saran Pembelian Token AI */}
+          {/* Simulator & Saran Pembelian Token AI */}
           <Card className="border-slate-200 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2 text-slate-800">
-                <BatteryCharging className="w-4 h-4 text-amber-500" />
-                Saran Pembelian Token AI
+              <CardTitle className="text-sm flex items-center justify-between text-slate-800">
+                <div className="flex items-center gap-2">
+                  <BatteryCharging className="w-4 h-4 text-amber-500" />
+                  Saran Pembelian Token AI
+                </div>
+                <span className="text-[10px] text-teal-700 font-bold bg-teal-50 px-2 py-0.5 rounded-full">
+                  Interactive
+                </span>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 pt-1">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Berdasarkan tren penggunaan harian, sisa token saat ini (<strong>{currentKwh.toFixed(1)} kWh</strong>) diprediksi habis dalam{' '}
+                Berdasarkan tren harian, sisa token saat ini (<strong>{currentKwh.toFixed(1)} kWh</strong>) diprediksi habis dalam{' '}
                 <strong className={daysRemaining < 3 ? 'text-rose-600 font-extrabold' : 'text-teal-700'}>
                   {daysRemaining} hari
                 </strong>{' '}
                 lagi.
               </p>
 
-              {/* Box Rekomendasi Nominal */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
+              {/* Simulator Pilihan Nominal Token */}
+              <div className="space-y-2">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                  Rekomendasi Nominal Isi Ulang Ideal:
+                  Pilih Nominal untuk Simulasi Daya Tahan:
                 </span>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-teal-800">
-                    Rp {recCost.toLocaleString('id-ID')}
-                  </span>
-                  <span className="text-xs font-semibold text-slate-500">
-                    (~{recKwh.toFixed(1)} kWh)
-                  </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {[200000, 500000, 1000000].map((amt) => (
+                    <Button
+                      key={amt}
+                      size="sm"
+                      variant={customAmount === amt ? 'default' : 'outline'}
+                      className={`text-xs ${
+                        customAmount === amt
+                          ? 'bg-teal-700 hover:bg-teal-800 text-white font-bold'
+                          : 'text-slate-700'
+                      }`}
+                      onClick={() => setCustomAmount(amt)}
+                    >
+                      Rp {(amt / 1000).toLocaleString('id-ID')}rb
+                    </Button>
+                  ))}
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Perkiraan cukup untuk menjaga operasional toko tetap aman hingga <strong>14 hari ke depan</strong>.
-                </p>
+              </div>
+
+              {/* Display Proyeksi Dynamic */}
+              <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 text-center space-y-1">
+                <span className="text-[11px] font-semibold text-slate-600 block">
+                  Proyeksi Token Rp {customAmount.toLocaleString('id-ID')}:
+                </span>
+                <div className="text-xl font-extrabold text-teal-900">
+                  +{simulatedDays} Hari Operasional
+                </div>
+                <div className="text-[10px] text-slate-500 font-mono">
+                  Mendapatkan ~{simulatedKwh.toFixed(1)} kWh dengan laju {dailyKwh.toFixed(1)} kWh/hari
+                </div>
               </div>
 
               {/* Action Button */}
@@ -251,6 +312,56 @@ export default function AiPage() {
                   <ExternalLink className="w-3.5 h-3.5 opacity-70" />
                 </Button>
               </a>
+            </CardContent>
+          </Card>
+
+          {/* Fitur Chatbot Asisten AI Interaktif */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2 text-slate-800">
+                <Sparkles className="w-4 h-4 text-teal-600 fill-teal-100" />
+                Tanya Asisten AI Listrik
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-1">
+              <div className="h-40 overflow-y-auto border border-slate-100 rounded-lg p-3 space-y-2 bg-slate-50/50 text-xs">
+                {messages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`flex ${
+                      msg.sender === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div
+                      className={`p-2.5 rounded-xl max-w-[85%] leading-relaxed ${
+                        msg.sender === 'user'
+                          ? 'bg-teal-700 text-white rounded-br-none'
+                          : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-xs'
+                      }`}
+                    >
+                      {msg.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Tanya AI (contoh: 'Kenapa toko boros?')..."
+                  value={inputPrompt}
+                  onChange={(e) => setInputPrompt(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                  className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
+                <Button
+                  size="sm"
+                  className="bg-teal-700 hover:bg-teal-800 text-white px-3"
+                  onClick={handleSendMessage}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </>
