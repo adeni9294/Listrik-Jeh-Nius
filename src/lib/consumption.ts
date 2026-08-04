@@ -11,6 +11,7 @@ export type IntervalResult = {
   deltaHours: number;
   kwhPerHour: number;
   valid: boolean; // true kalau deltaHours>0 dan deltaKwh>=0
+  isRollover?: boolean; // true kalau kita menyesuaikan karena rollover
 };
 
 export type ConsumptionSummary = {
@@ -34,7 +35,12 @@ function hoursBetween(a: string | Date, b: string | Date): number {
   return Math.abs(db - da) / (1000 * 60 * 60);
 }
 
-export function computeConsumption(scansInput: Scan[] = []): ConsumptionSummary {
+export function computeConsumption(
+  scansInput: Scan[] = [],
+  options?: { maxMeterValue?: number }
+): ConsumptionSummary {
+  const maxMeterValue = options?.maxMeterValue;
+
   if (!Array.isArray(scansInput) || scansInput.length === 0) {
     return {
       scansCount: 0,
@@ -58,8 +64,18 @@ export function computeConsumption(scansInput: Scan[] = []): ConsumptionSummary 
   for (let i = 1; i < scans.length; i++) {
     const prev = scans[i - 1];
     const curr = scans[i];
-    const deltaKwh = curr.kwh - prev.kwh; // newer - older
+    let deltaKwh = curr.kwh - prev.kwh; // newer - older
     const deltaHours = hoursBetween(curr.created_at, prev.created_at);
+    let isRollover = false;
+
+    // Handle possible rollover if deltaKwh < 0 and maxMeterValue provided
+    if (deltaKwh < 0 && typeof maxMeterValue === 'number' && maxMeterValue > 0) {
+      // assume meter rolled over: compute adjusted delta
+      // e.g., prev = 99990, curr = 10, max=99999 => (max - prev) + curr
+      deltaKwh = Math.max(0, (maxMeterValue - prev.kwh) + curr.kwh);
+      isRollover = true;
+    }
+
     const valid = deltaHours > 0 && deltaKwh >= 0;
     const kwhPerHour = deltaHours > 0 ? deltaKwh / deltaHours : 0;
 
@@ -70,6 +86,7 @@ export function computeConsumption(scansInput: Scan[] = []): ConsumptionSummary 
       deltaHours,
       kwhPerHour,
       valid,
+      isRollover: isRollover || undefined,
     });
   }
 
