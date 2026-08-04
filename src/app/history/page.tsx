@@ -16,7 +16,9 @@ interface Meter {
 export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
-  const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+  const [selectedMeterId, setSelectedMeterId] = useState<string>(
+    typeof window !== 'undefined' ? (localStorage.getItem('active_store_id') || 'all') : 'all'
+  );
   const [historyData, setHistoryData] = useState<Reading[]>([]);
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export default function HistoryPage() {
             });
 
             const next = historyData[index + 1];
-            const usage = next ? Math.max(0, item.kwh - next.kwh) : null; // array is DESC, so current - next
+            const usage = next ? Math.max(0, next.kwh - item.kwh) : null; // array is DESC, so older (next) - newer (current)
 
             return (
               <Card key={item.id} className="overflow-hidden border-slate-200 shadow-sm hover:border-teal-300 transition">
