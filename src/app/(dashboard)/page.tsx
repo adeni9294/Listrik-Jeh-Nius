@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut } from 'lucide-react';
+import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -14,8 +14,11 @@ interface MeterWithReading {
   meter_number: string;
   power_va: number;
   lastReading: number | null;
-  monthlyUsage: number;
-  perDay?: number;
+  hourlyRate: number;      // kWh / jam
+  dailyProjection: number; // kWh / hari
+  weeklyProjection: number;// kWh / minggu
+  monthlyProjection: number;// kWh / bulan
+  lastScanIntervalHours: number;
 }
 
 export default function DashboardPage() {
@@ -25,13 +28,11 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
 
-  // State Data Toko & Metrik Real-time
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
-  const [totalKwhMonth, setTotalKwhMonth] = useState<number>(0);
   const [remainingTokenKwh, setRemainingTokenKwh] = useState<number>(0);
+  const [avgHourlyRateAll, setAvgHourlyRateAll] = useState<number>(0);
 
-  // Dynamic AI Metrics (Dihitung otomatis)
   const [intelligenceScore, setIntelligenceScore] = useState<number>(88);
   const [dataQuality, setDataQuality] = useState<number>(92);
   const [daysLeft, setDaysLeft] = useState<number>(0);
@@ -47,7 +48,7 @@ export default function DashboardPage() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Ambil semua toko milik user
+      // 1. Ambil daftar toko
       const { data: meters, error: metersError } = await supabase
         .from('meters')
         .select('id, name, store_name, meter_number, power_va, created_at')
@@ -70,77 +71,69 @@ export default function DashboardPage() {
         setActiveStoreId(first.id);
       }
 
-      // Hitung Tanggal Awal Bulan Ini
-      const now = new Date();
-      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-      let accumKwhAllStores = 0;
       let accumLastReadings = 0;
+      let accumHourlyRate = 0;
       const computedMeters: MeterWithReading[] = [];
 
-      // 2. Query dan hitung bacaan untuk setiap toko
+      // 2. Query 2 data scan TERBARU untuk setiap toko (Berdasarkan created_at DESC)
       for (const m of meters) {
-        // Ambil SEMUA bacaan bulan ini (diurutkan TERBARU -> TERLAMA)
-        const { data: monthReadings, error: monthErr } = await supabase
+        const { data: readings, error: readErr } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, created_at')
           .eq('meter_id', m.id)
-          .gte('created_at', firstDayOfMonth)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(2);
 
-        if (monthErr) console.warn(`Error fetching month readings for ${m.id}:`, monthErr);
+        if (readErr) console.warn(`Error fetching readings for ${m.id}:`, readErr);
 
-        let storeMonthlyUsage = 0;
-        let storePerDay = 0;
-        const lastVal = monthReadings && monthReadings.length > 0 
-          ? Number(monthReadings[0].meter_value ?? monthReadings[0].kwh ?? 0) 
-          : null;
+        let lastVal: number | null = null;
+        let hourlyRate = 0;
+        let dailyProj = 0;
+        let weeklyProj = 0;
+        let monthlyProj = 0;
+        let intervalHours = 0;
 
-        if (monthReadings && monthReadings.length >= 2) {
-          // Normalisasi array data
-          const readings = monthReadings.map((r: any) => ({
-            kwh: Number(r.meter_value ?? r.kwh ?? 0),
-            created_at: new Date(r.created_at).getTime(),
-          }));
+        if (readings && readings.length > 0) {
+          lastVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
 
-          // Hitung total pemakaian bulan ini & laju pemakaian
-          for (let i = 0; i < readings.length - 1; i++) {
-            const current = readings[i];     // Scan lebih baru
-            const previous = readings[i + 1]; // Scan lebih lama
+          if (readings.length === 2) {
+            const latest = {
+              kwh: Number(readings[0].meter_value ?? readings[0].kwh ?? 0),
+              time: new Date(readings[0].created_at).getTime(),
+            };
+            const previous = {
+              kwh: Number(readings[1].meter_value ?? readings[1].kwh ?? 0),
+              time: new Date(readings[1].created_at).getTime(),
+            };
 
-            // 💡 SISA TOKEN PRABAYAR: Pemakaian = Previous - Current
-            if (previous.kwh >= current.kwh) {
-              const delta = previous.kwh - current.kwh;
-              storeMonthlyUsage += delta;
+            // Hitung selisih jam antar scan (misal jam 10:00 -> 12:30 = 2.5 jam)
+            const diffMs = latest.time - previous.time;
+            intervalHours = diffMs / (1000 * 60 * 60);
+
+            // Cek Normal Pemakaian vs Top-Up Token
+            if (previous.kwh >= latest.kwh) {
+              const consumedKwh = previous.kwh - latest.kwh;
+
+              // Batas aman: Jika scan < 15 menit (0.25 jam), jangan ekstrapolasi berlebihan
+              if (intervalHours >= 0.25) {
+                hourlyRate = consumedKwh / intervalHours;
+              } else if (intervalHours > 0) {
+                // Untuk tes cepat < 15 menit, hitung laju langsung tanpa pembagian jam mikro
+                hourlyRate = consumedKwh;
+              }
             } else {
-              // 💡 Jika Current > Previous -> USER ISI REFILL/TOP-UP TOKEN!
-              // Jangan hitung sebagai rollover/pemakaian gila-gilaan
+              // Top-Up Token: pemakaian interval diset 0
+              hourlyRate = 0;
             }
-          }
 
-          // Hitung Laju Konsumsi dari 2 Scan TERBARU
-          const latest = readings[0];
-          const prevLatest = readings[1];
-
-          if (prevLatest.kwh >= latest.kwh) {
-            const latestDelta = prevLatest.kwh - latest.kwh;
-            const hoursDiff = (latest.created_at - prevLatest.created_at) / (1000 * 60 * 60);
-
-            // Safety check: Minimal selisih 15 menit (0.25 jam) agar angka tidak meledak saat testing
-            if (hoursDiff >= 0.25) {
-              const hourlyRate = latestDelta / hoursDiff;
-              storePerDay = hourlyRate * 24; // Proyeksi 24 jam
-            } else {
-              // Jika < 15 menit, gunakan pemakaian flat langsung sebagai perkiraan dasar
-              storePerDay = storeMonthlyUsage;
-            }
+            dailyProj = hourlyRate * 24;
+            weeklyProj = dailyProj * 7;
+            monthlyProj = dailyProj * 30;
           }
         }
 
-        if (lastVal !== null) {
-          accumLastReadings += lastVal;
-        }
-        accumKwhAllStores += storeMonthlyUsage;
+        if (lastVal !== null) accumLastReadings += lastVal;
+        accumHourlyRate += hourlyRate;
 
         computedMeters.push({
           id: m.id,
@@ -148,26 +141,28 @@ export default function DashboardPage() {
           meter_number: m.meter_number,
           power_va: m.power_va || 1300,
           lastReading: lastVal,
-          monthlyUsage: storeMonthlyUsage,
-          perDay: storePerDay,
+          hourlyRate,
+          dailyProjection: dailyProj,
+          weeklyProjection: weeklyProj,
+          monthlyProjection: monthlyProj,
+          lastScanIntervalHours: intervalHours,
         });
       }
 
       setMetersData(computedMeters);
-      setTotalKwhMonth(accumKwhAllStores);
       setRemainingTokenKwh(accumLastReadings);
 
-      // Hitung Estimasi Sisa Hari Token
-      const totalDailyUsage = computedMeters.reduce((s, mm) => s + (mm.perDay || 0), 0);
-      const estimatedDays = totalDailyUsage > 0 
-        ? Math.max(0, Math.floor(accumLastReadings / totalDailyUsage)) 
+      const avgHourly = meters.length > 0 ? accumHourlyRate / meters.length : 0;
+      setAvgHourlyRateAll(avgHourly);
+
+      // Estimasi Hari Sisa Token berdasarkan laju hourly rate total (24 jam)
+      const totalDailyUsage = accumHourlyRate * 24;
+      const estimatedDays = totalDailyUsage > 0
+        ? Math.max(0, Math.floor(accumLastReadings / totalDailyUsage))
         : 0;
       setDaysLeft(estimatedDays);
 
-      // Metrik AI
-      const score = Math.min(98, 75 + meters.length * 5);
-      setIntelligenceScore(score);
-
+      setIntelligenceScore(Math.min(98, 75 + meters.length * 5));
     } catch (err: any) {
       console.error('Error fetching dashboard:', err?.message || err);
     } finally {
@@ -182,9 +177,7 @@ export default function DashboardPage() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'meter_readings' },
-        () => {
-          fetchDashboardData();
-        }
+        () => fetchDashboardData()
       )
       .subscribe();
 
@@ -192,7 +185,7 @@ export default function DashboardPage() {
       try {
         channel.unsubscribe();
       } catch (err) {
-        console.warn('Error unsubscribing realtime channel', err);
+        console.warn('Error unsubscribing channel', err);
       }
     };
   }, [supabase]);
@@ -204,14 +197,13 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  // Filter Toko
   const filteredMeters = selectedMeterId === 'all'
     ? metersData
     : metersData.filter(m => m.id === selectedMeterId);
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header Profile Info & Akses Navigasi */}
+      {/* Header Info */}
       <div className="flex justify-between items-center gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Halo, Pengelola Toko 👋</h1>
@@ -227,7 +219,6 @@ export default function DashboardPage() {
               size="sm"
               variant="outline"
               className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
-              title="Keluar dari Toko"
             >
               <LogOut className="w-3.5 h-3.5" /> Keluar
             </Button>
@@ -306,7 +297,7 @@ export default function DashboardPage() {
                   {daysLeft} <span className="text-xs font-normal">Hari Lagi</span>
                 </div>
                 <p className="text-[10px] text-slate-500 mt-1">
-                  Total Pemakaian: {totalKwhMonth.toFixed(1)} kWh
+                  Laju: {avgHourlyRateAll.toFixed(2)} kWh/jam
                 </p>
               </CardContent>
             </Card>
@@ -333,7 +324,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* List Breakdown Toko */}
+          {/* Breakdown Toko */}
           {filteredMeters.length === 0 ? (
             <Card className="border-dashed border-slate-300 bg-slate-50">
               <CardContent className="p-6 text-center space-y-3">
@@ -362,6 +353,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
 
+                    {/* Rata-Rata Per Jam & Sisa Meteran */}
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div className="bg-slate-50 p-2.5 rounded-xl">
                         <span className="text-slate-500 block text-[10px]">Sisa Meteran</span>
@@ -370,10 +362,28 @@ export default function DashboardPage() {
                         </span>
                       </div>
                       <div className="bg-teal-50 p-2.5 rounded-xl">
-                        <span className="text-teal-700 block text-[10px]">Pemakaian Bulan Ini</span>
-                        <span className="font-extrabold text-teal-900 text-sm">
-                          {m.monthlyUsage.toFixed(1)} kWh
+                        <span className="text-teal-700 block text-[10px] flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> Pemakaian Rata-Rata
                         </span>
+                        <span className="font-extrabold text-teal-900 text-sm">
+                          {m.hourlyRate.toFixed(2)} kWh/jam
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Proyeksi Harian, Mingguan, Bulanan */}
+                    <div className="bg-slate-100/70 p-2.5 rounded-xl grid grid-cols-3 gap-1 text-center text-[11px]">
+                      <div>
+                        <span className="text-slate-500 block text-[9px]">Sehari (24j)</span>
+                        <span className="font-bold text-slate-700">{m.dailyProjection.toFixed(1)} kWh</span>
+                      </div>
+                      <div className="border-x border-slate-200">
+                        <span className="text-slate-500 block text-[9px]">Seminggu</span>
+                        <span className="font-bold text-slate-700">{m.weeklyProjection.toFixed(1)} kWh</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[9px]">Sebulan (30h)</span>
+                        <span className="font-bold text-slate-700">{m.monthlyProjection.toFixed(1)} kWh</span>
                       </div>
                     </div>
                   </CardContent>
@@ -390,8 +400,9 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="p-4 pt-0 text-xs text-slate-700 space-y-2">
               <p>
-                Rata-rata konsumsi harian dari <strong>{metersData.length} toko</strong> Anda stabil di angka{' '}
-                <strong>{(totalKwhMonth / (new Date().getDate()) || 0).toFixed(1)} kWh/hari</strong>.
+                Rata-rata konsumsi listrik toko Anda saat ini adalah{' '}
+                <strong>{avgHourlyRateAll.toFixed(2)} kWh/jam</strong> (sekitar{' '}
+                <strong>{(avgHourlyRateAll * 24).toFixed(1)} kWh/hari</strong>).
               </p>
               <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
                 💡 <strong>Rekomendasi Gemini AI:</strong> Isi ulang token disarankan ketika sisa token berada di bawah{' '}
