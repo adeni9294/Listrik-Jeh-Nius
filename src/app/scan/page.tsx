@@ -136,24 +136,28 @@ export default function ScanPage() {
 
     setIsSaving(true);
     try {
-      // Cek user login (lebih defensif)
+      // Pastikan user terautentikasi
       const { data: userData, error: userErr } = await supabase.auth.getUser();
       const user = userData?.user;
       if (userErr) console.warn('getUser error', userErr);
+      if (!user?.id) {
+        alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
+        router.push('/login');
+        return;
+      }
 
       const payload: Record<string, any> = {
         kwh: finalKwh,
-        meter_value: finalKwh, // <-- pastikan meter_value terisi
+        meter_value: finalKwh, // pastikan meter_value terisi
         confidence: isEditing ? 100 : validationResult.confidence,
         reading_date: new Date().toISOString().split('T')[0],
         reading_time: new Date().toTimeString().split(' ')[0],
         created_at: new Date().toISOString(),
+        meter_id: selectedMeterId,
+        user_id: user.id,
       };
 
-      if (selectedMeterId) payload.meter_id = selectedMeterId;
-      if (user?.id) payload.user_id = user.id;
-
-      // Insert dan minta data yang baru disimpan untuk verifikasi
+      // Insert dan kembalikan row yang baru disimpan
       const { data: insertedRow, error: insertError } = await supabase
         .from('meter_readings')
         .insert([payload])
@@ -164,9 +168,10 @@ export default function ScanPage() {
 
       if (insertError) throw insertError;
 
-      alert('Berhasil menyimpan data pemakaian listrik toko!');
+      // Tampilkan ringkasan singkat ke user
+      alert(`Tersimpan: ${insertedRow.kwh} kWh (meter: ${insertedRow.meter_id})`);
 
-      // Gunakan replace + refresh agar halaman dashboard mengambil data terbaru
+      // Refresh dashboard / halaman utama
       router.replace('/');
       router.refresh();
     } catch (err: any) {
