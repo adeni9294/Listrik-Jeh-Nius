@@ -39,7 +39,7 @@ export default function TambahTokoPage() {
         throw new Error('Mohon lengkapi semua kolom yang wajib diisi.');
       }
 
-      // 1. Insert Toko / Meteran Baru beserta Kata Sandi & Role Default
+      // 1. Insert Toko / Meteran Baru (Kolom 'role' telah dihapus agar tidak terjadi error schema cache)
       const { data: inserted, error: insertError } = await supabase
         .from('meters')
         .insert([
@@ -49,7 +49,6 @@ export default function TambahTokoPage() {
             meter_number: meterNumber.trim(),
             power_va: parseInt(powerVa),
             password: password.trim(),
-            role: 'staff', // Default role toko baru adalah staff
           },
         ])
         .select()
