@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw } from 'lucide-react';
+import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 interface MeterWithReading {
@@ -17,8 +18,11 @@ interface MeterWithReading {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const supabase = createClient();
+
   const [loading, setLoading] = useState(true);
+  const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
 
   // State Data Toko & Metrik Real-time
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
@@ -32,8 +36,18 @@ export default function DashboardPage() {
   const [daysLeft, setDaysLeft] = useState<number>(0);
 
   useEffect(() => {
+    // Check Active Session Toko di LocalStorage
+    const storedStoreId = localStorage.getItem('active_store_id');
+    setActiveStoreId(storedStoreId);
+
+    // Jika belum login / memilih toko, alihkan ke /login
+    if (!storedStoreId) {
+      router.push('/login');
+      return;
+    }
+
     fetchDashboardData();
-  }, []);
+  }, [router]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -92,7 +106,7 @@ export default function DashboardPage() {
 
         computedMeters.push({
           id: m.id,
-          store_name: m.store_name,
+          store_name: m.store_name || m.name,
           meter_number: m.meter_number,
           power_va: m.power_va || 1300,
           lastReading: latest ? latest.kwh : null,
@@ -121,6 +135,13 @@ export default function DashboardPage() {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('active_store_id');
+    localStorage.removeItem('active_store_name');
+    localStorage.removeItem('active_meter_number');
+    router.push('/login');
+  };
+
   // Filter Toko yang Tampil
   const filteredMeters = selectedMeterId === 'all'
     ? metersData
@@ -128,19 +149,44 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header Profile Info & Tambah Toko */}
-      <div className="flex justify-between items-center">
+      {/* Header Profile Info & Akses Navigasi */}
+      <div className="flex justify-between items-center gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Halo, Pengelola Toko 👋</h1>
           <p className="text-xs text-slate-500">
             Monitoring: <span className="font-semibold text-teal-700">{metersData.length} Toko Terdaftar</span>
           </p>
         </div>
-        <Link href="/toko/tambah">
-          <Button size="sm" variant="outline" className="bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100 text-xs font-bold gap-1">
-            <Plus className="w-3.5 h-3.5" /> Toko
-          </Button>
-        </Link>
+
+        <div className="flex items-center gap-1.5">
+          {activeStoreId ? (
+            <Button
+              onClick={handleLogout}
+              size="sm"
+              variant="outline"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              title="Keluar dari Toko"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Keluar
+            </Button>
+          ) : (
+            <Link href="/login">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Masuk
+              </Button>
+            </Link>
+          )}
+
+          <Link href="/toko/tambah">
+            <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold gap-1 px-2.5 h-8">
+              <Plus className="w-3.5 h-3.5" /> Toko
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {loading ? (
