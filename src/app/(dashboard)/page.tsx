@@ -530,7 +530,7 @@ export default function DashboardPage() {
                 <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
               </p>
               <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
-                💡 <strong>Rekomendasi Gemini AI:</strong> Lakukan pindaian minimal 2x sehari (pagi & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang lebih presisi.
+                💡 <strong>Rekomendasi :</strong> Lakukan pindaian minimal 2x sehari (pagi & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang lebih presisi.
               </div>
             </CardContent>
           </Card>
