@@ -151,6 +151,30 @@ export default function DashboardPage() {
     }
   };
 
+  // Realtime subscription: update dashboard when meter_readings change
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const channel = supabase
+      .channel('public:meter_readings')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'meter_readings' },
+        (payload: any) => {
+          console.log('Realtime change on meter_readings:', payload);
+          fetchDashboardData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        channel.unsubscribe();
+      } catch (err) {
+        console.warn('Error unsubscribing realtime channel', err);
+      }
+    };
+  }, [supabase]);
+
   const handleLogout = () => {
     localStorage.removeItem('active_store_id');
     localStorage.removeItem('active_store_name');
