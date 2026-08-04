@@ -171,7 +171,7 @@ export function computeDailyUsage(
     .map(r => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const summary = computeConsumption(scans);
+  const summary = computeConsumption(scans, { maxMeterValue: 99999 });
 
   // latestInterval.deltaKwh adalah newer - older
   return summary.latestInterval ? Math.max(0, summary.latestInterval.deltaKwh) : 0;
@@ -189,7 +189,7 @@ export function getTotalUsage(
     .map(r => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const summary = computeConsumption(scans);
+  const summary = computeConsumption(scans, { maxMeterValue: 99999 });
 
   // jumlahkan deltaKwh hanya dari interval valid
   return summary.intervals.filter(i => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0);
@@ -205,7 +205,7 @@ export function getStatistics(
     .map(r => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const summary = computeConsumption(scans);
+  const summary = computeConsumption(scans, { maxMeterValue: 99999 });
 
   return {
     totalReading: readings.length,
