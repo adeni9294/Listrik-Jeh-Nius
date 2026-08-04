@@ -3,10 +3,10 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Camera, RefreshCw, Edit3, Check, Store } from 'lucide-react';
+import { Camera, RefreshCw, Edit3, Check, Store, Image as ImageIcon } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
-import { createClient } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { fetchMeterReadingsClient } from '@/lib/meterReadingsClient';
 
 interface Meter {
@@ -20,6 +20,7 @@ export default function ScanPage() {
   const supabase = createClient();
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [compressedFileBlob, setCompressedFileBlob] = useState<Blob | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
@@ -71,9 +72,10 @@ export default function ScanPage() {
     try {
       // 1. Resize & Compress Gambar
       const compressedBlob = await processAndCompressImage(file);
+      setCompressedFileBlob(compressedBlob);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir Asli dari Toko yang Dipilih (gunakan helper yang konsisten)
+      // 2. Ambil Bacaan Terakhir Asli dari Toko yang Dipilih
       let lastReadingValue = 0;
       if (selectedMeterId) {
         try {
@@ -120,80 +122,104 @@ export default function ScanPage() {
     }
   };
 
- // Simpan Data ke Supabase
-const handleSave = async () => {
-  if (!validationResult) return;
+  // Upload gambar ke Supabase Storage & dapatkan Public URL
+  const uploadImageToStorage = async (blob: Blob, meterId: string): Promise<string | null> => {
+    try {
+      const fileName = `${meterId}/${Date.now()}.jpg`;
 
-  if (!selectedMeterId && meters.length > 0) {
-    alert('Pilih toko terlebih dahulu!');
-    return;
-  }
+      // Mencoba upload ke bucket 'meter-images'
+      const { data, error } = await supabase.storage
+        .from('meter-images')
+        .upload(fileName, blob, { contentType: 'image/jpeg' });
 
-  const finalKwh = parseFloat(manualValue);
-  if (isNaN(finalKwh) || finalKwh <= 0) {
-    alert('Masukkan angka kWh yang valid.');
-    return;
-  }
+      if (error) {
+        console.warn('Storage upload error (meter-images):', error.message);
+        return null;
+      }
 
-  setIsSaving(true);
-  try {
-    // Ambil ID toko aktif dari localStorage (hasil login password toko / tambah toko)
-    const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
-    const meterId = selectedMeterId || activeStoreId;
+      const { data: publicUrlData } = supabase.storage
+        .from('meter-images')
+        .getPublicUrl(data.path);
 
-    if (!meterId) {
-      alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
-      router.push('/login');
+      return publicUrlData.publicUrl;
+    } catch (err) {
+      console.error('Gagal mengunggah foto:', err);
+      return null;
+    }
+  };
+
+  // Simpan Data ke Supabase
+  const handleSave = async () => {
+    if (!validationResult) return;
+
+    if (!selectedMeterId && meters.length > 0) {
+      alert('Pilih toko terlebih dahulu!');
       return;
     }
 
-    const now = new Date();
+    const finalKwh = parseFloat(manualValue);
+    if (isNaN(finalKwh) || finalKwh <= 0) {
+      alert('Masukkan angka kWh yang valid.');
+      return;
+    }
 
-    const payload = {
-      meter_id: meterId,
+    setIsSaving(true);
+    try {
+      const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
+      const meterId = selectedMeterId || activeStoreId;
 
-      meter_value: finalKwh,
-      kwh: finalKwh,
+      if (!meterId) {
+        alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
+        router.push('/login');
+        return;
+      }
 
-      confidence: isEditing
-        ? 100
-        : validationResult.confidence,
+      // Upload gambar terlebih dahulu jika ada
+      let uploadedImageUrl: string | null = null;
+      if (compressedFileBlob) {
+        uploadedImageUrl = await uploadImageToStorage(compressedFileBlob, meterId);
+      }
 
-      status: "success",
+      const now = new Date();
 
-      reading_date: now.toISOString().slice(0,10),
+      const payload = {
+        meter_id: meterId,
+        meter_value: finalKwh,
+        kwh: finalKwh,
+        confidence: isEditing ? 100 : validationResult.confidence,
+        status: 'success',
+        image_url: uploadedImageUrl,
+        reading_date: now.toISOString().slice(0, 10),
+        reading_time: now.toTimeString().split(' ')[0],
+        created_at: now.toISOString(),
+      };
 
- reading_time: now.toTimeString().split(' ')[0], 
+      // Insert dan ambil inserted row
+      const { data: insertedRow, error: insertError } = await supabase
+        .from('meter_readings')
+        .insert([payload])
+        .select()
+        .single();
 
-  created_at: now.toISOString(),
-};
+      if (insertError) throw insertError;
 
-    // Insert dan ambil inserted row
-    const { data: insertedRow, error: insertError } = await supabase
-      .from('meter_readings')
-      .insert([payload])
-      .select()
-      .single();
-
-    console.log('Inserted meter_reading:', { payload, insertedRow, insertError });
-
-    if (insertError) throw insertError;
-
-    alert(`Tersimpan: ${insertedRow.kwh} kWh (meter: ${insertedRow.meter_id})`);
-    router.replace('/');
-    router.refresh();
-  } catch (err: any) {
-    console.error('Gagal menyimpan ke Supabase:', err);
-    alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
-  } finally {
-    setIsSaving(false);
-  }
-};
+      alert(`Tersimpan: ${insertedRow.kwh} kWh`);
+      router.replace('/');
+      router.refresh();
+    } catch (err: any) {
+      console.error('Gagal menyimpan ke Supabase:', err);
+      alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      <h1 className="text-xl font-bold text-slate-800">Pindai Meter Listrik</h1>
-      <p className="text-xs text-slate-500">Ambil foto layar angka meteran PLN toko Anda dengan jelas.</p>
+      <div>
+        <h1 className="text-xl font-bold text-slate-800">Pindai Meter Listrik</h1>
+        <p className="text-xs text-slate-500">Ambil foto layar angka meteran PLN toko Anda dengan jelas.</p>
+      </div>
 
       {/* Selector Toko / Meteran */}
       <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
@@ -206,7 +232,7 @@ const handleSave = async () => {
           <select
             value={selectedMeterId}
             onChange={(e) => setSelectedMeterId(e.target.value)}
-            className="w-full text-sm bg-white p-2.5 border rounded-lg focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+            className="w-full text-sm bg-white p-2.5 border rounded-lg focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 outline-none"
           >
             {meters.map((m) => (
               <option key={m.id} value={m.id}>
@@ -233,7 +259,7 @@ const handleSave = async () => {
           <img src={previewUrl} alt="Preview Meter" className="w-full h-full object-cover" />
         ) : (
           <div className="text-center p-6 text-slate-400 space-y-2">
-            <Camera className="w-12 h-12 mx-auto stroke-1" />
+            <Camera className="w-12 h-12 mx-auto stroke-1 text-slate-400" />
             <p className="text-xs">Arahkan kamera ke layar kWh meteran toko</p>
           </div>
         )}
@@ -241,13 +267,13 @@ const handleSave = async () => {
         {isProcessing && (
           <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center text-white space-y-3">
             <RefreshCw className="w-8 h-8 animate-spin text-teal-400" />
-            <span className="text-xs font-semibold">sedang membaca & memvalidasi angka...</span>
+            <span className="text-xs font-semibold">Sedang membaca & memvalidasi angka...</span>
           </div>
         )}
       </div>
 
       {/* Control Actions */}
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <label className="flex-1">
           <input
             type="file"
@@ -256,8 +282,22 @@ const handleSave = async () => {
             onChange={handleCapture}
             className="hidden"
           />
-          <div className="w-full bg-teal-700 hover:bg-teal-800 text-white font-semibold py-3 px-4 rounded-xl text-center text-sm cursor-pointer shadow-md">
-            {previewUrl ? 'Ambil Ulang Foto' : 'Buka Kamera'}
+          <div className="w-full bg-teal-700 hover:bg-teal-800 text-white font-semibold py-3 px-3 rounded-xl text-center text-xs cursor-pointer shadow-md flex items-center justify-center gap-1.5 transition">
+            <Camera className="w-4 h-4" />
+            {previewUrl ? 'Foto Ulang' : 'Buka Kamera'}
+          </div>
+        </label>
+
+        <label className="flex-1">
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleCapture}
+            className="hidden"
+          />
+          <div className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-3 px-3 rounded-xl text-center text-xs cursor-pointer border border-slate-200 flex items-center justify-center gap-1.5 transition">
+            <ImageIcon className="w-4 h-4 text-slate-500" />
+            Pilih Galeri
           </div>
         </label>
       </div>
@@ -324,7 +364,7 @@ const handleSave = async () => {
           <Button
             onClick={handleSave}
             disabled={isSaving}
-            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl flex justify-center items-center gap-2"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl flex justify-center items-center gap-2 transition shadow-sm"
           >
             {isSaving ? (
               <>
