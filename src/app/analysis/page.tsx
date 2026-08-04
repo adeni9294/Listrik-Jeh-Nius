@@ -17,7 +17,9 @@ export default function AnalysisPage() {
 
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
-  const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+  const [selectedMeterId, setSelectedMeterId] = useState<string>(
+    typeof window !== 'undefined' ? (localStorage.getItem('active_store_id') || 'all') : 'all'
+  );
 
   // Metrik Analisis Real
   const [dailyAvgKwh, setDailyAvgKwh] = useState<number>(0);
@@ -79,8 +81,8 @@ export default function AnalysisPage() {
       const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
       const diffDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
 
-      const totalKwhUsed = Math.max(0, lastReading.kwh - firstReading.kwh);
-      const avgDaily = totalKwhUsed / diffDays || 4.2;
+      const totalKwhUsed = Math.max(0, firstReading.kwh - lastReading.kwh);
+      const avgDaily = diffDays > 0 ? totalKwhUsed / diffDays : 4.2;
       const estMonthly = avgDaily * 30;
 
       setDailyAvgKwh(avgDaily);
