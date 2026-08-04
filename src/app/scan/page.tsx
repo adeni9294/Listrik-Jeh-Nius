@@ -155,7 +155,7 @@ const { error } = await supabase
   .insert([
     {
       meter_id: selectedMeterId,
-      kwh: parseFloat(kwhValue),
+      kwh: parseFloat(kwhResult),
       reading_date: new Date().toISOString(), // <-- Tambahkan tanggal hari ini
       // ... field lainnya jika ada
     },
