@@ -20,6 +20,7 @@ import {
   Building2,
   AlertTriangle,
   ArrowRight,
+  Download,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { getTariffRate } from '@/lib/constants';
@@ -46,11 +47,10 @@ export default function AnalysisPage() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState<string>('staff');
   const [meters, setMeters] = useState<Meter[]>([]);
   const [storeAnalysisList, setStoreAnalysisList] = useState<StoreAnalysisItem[]>([]);
-  const [selectedMeterId, setSelectedMeterId] = useState<string>(
-    typeof window !== 'undefined' ? localStorage.getItem('active_store_id') || 'all' : 'all'
-  );
+  const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
 
   // Metrik berbasis jam & estimasi token
   const [hourlyRate, setHourlyRate] = useState<number>(0);
@@ -66,35 +66,46 @@ export default function AnalysisPage() {
   const NORMAL_HOURLY_THRESHOLD = 10.0; // Ambang batas normal (10 kWh/jam)
 
   useEffect(() => {
-    fetchAnalysisData();
+    const role = localStorage.getItem('user_role') || 'staff';
+    const activeStoreId = localStorage.getItem('active_store_id');
+    setUserRole(role);
+
+    if (role !== 'admin' && activeStoreId) {
+      setSelectedMeterId(activeStoreId);
+    }
+
+    fetchAnalysisData(role, activeStoreId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId]);
 
-  const fetchAnalysisData = async () => {
+  const fetchAnalysisData = async (roleParam?: string, activeStoreIdParam?: string | null) => {
     setLoading(true);
     try {
-      let currentMeters = meters;
-      if (currentMeters.length === 0) {
-        const { data: metersData } = await supabase
-          .from('meters')
-          .select('id, store_name, meter_number, power_va')
-          .order('created_at', { ascending: false });
+      const currentRole = roleParam ?? (localStorage.getItem('user_role') || 'staff');
+      const currentActiveStore = activeStoreIdParam ?? localStorage.getItem('active_store_id');
 
-        if (metersData) {
-          setMeters(metersData);
-          currentMeters = metersData;
-        }
+      let query = supabase
+        .from('meters')
+        .select('id, store_name, meter_number, power_va')
+        .order('created_at', { ascending: false });
+
+      // RBAC: Kunci query hanya ke toko miliknya sendiri jika BUKAN Admin
+      if (currentRole !== 'admin' && currentActiveStore) {
+        query = query.eq('id', currentActiveStore);
       }
 
-      // Ambil analisis detail untuk semua toko (digunakan untuk tabel matriks perbandingan)
+      const { data: metersData } = await query;
+      let currentMeters = metersData || [];
+      setMeters(currentMeters);
+
+      // Ambil analisis detail untuk semua toko
       const detailedAnalysisList: StoreAnalysisItem[] = [];
-      if (currentMeters && currentMeters.length > 0) {
+      if (currentMeters.length > 0) {
         for (const m of currentMeters) {
           const { rate, latestKwh } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
           const storeMonthlyCost = rate * 24 * 30 * storeTariff;
-          
-          // Estimasi sisa hari berdasarkan pembacaan kWh terakhir dan pemakaian harian
+
           const dailyKwh = rate * 24;
           const daysLeft = dailyKwh > 0 ? Math.floor(latestKwh / dailyKwh) : 99;
 
@@ -111,12 +122,10 @@ export default function AnalysisPage() {
         }
       }
 
-      // Sort toko berdasarkan urgensi (token yang paling cepat habis ditaruh paling atas)
       detailedAnalysisList.sort((a, b) => a.daysRemaining - b.daysRemaining);
       setStoreAnalysisList(detailedAnalysisList);
 
-      // Kalkulasi Ringkasan Terpilih (Filter 'all' vs Toko Spesifik)
-      if (selectedMeterId === 'all') {
+      if (selectedMeterId === 'all' && currentRole === 'admin') {
         let totalHourlyRate = 0;
         let totalMonthlyCost = 0;
         let countWithData = 0;
@@ -130,12 +139,14 @@ export default function AnalysisPage() {
         const avgHourly = countWithData > 0 ? totalHourlyRate / countWithData : 0;
         applyMetrics(avgHourly, totalMonthlyCost);
       } else {
-        const activeItem = detailedAnalysisList.find((m) => m.id === selectedMeterId);
+        const activeTargetId = selectedMeterId === 'all' ? currentMeters[0]?.id : selectedMeterId;
+        const activeItem = detailedAnalysisList.find((m) => m.id === activeTargetId);
+        
         if (activeItem) {
           applyMetrics(activeItem.hourlyRate, activeItem.monthlyCost);
-        } else {
-          const rateData = await calculateRateAndReadingForMeter(selectedMeterId);
-          const activeMeter = currentMeters.find((m) => m.id === selectedMeterId);
+        } else if (activeTargetId) {
+          const rateData = await calculateRateAndReadingForMeter(activeTargetId);
+          const activeMeter = currentMeters.find((m) => m.id === activeTargetId);
           const tariff = getTariffRate(activeMeter?.power_va || 1300);
           const monthlyCost = rateData.rate * 24 * 30 * tariff;
           applyMetrics(rateData.rate, monthlyCost);
@@ -205,28 +216,54 @@ export default function AnalysisPage() {
     setMonthlyEstCost(calculatedMonthlyCost);
   };
 
+  // FUNGSI EXPORT DATA LAPORAN KE CSV
+  const handleExportCSV = () => {
+    if (storeAnalysisList.length === 0) return;
+
+    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
+    const rows = storeAnalysisList.map((item) => [
+      `"${item.store_name}"`,
+      `"${item.meter_number || '-'}"`,
+      item.power_va,
+      item.hourlyRate.toFixed(2),
+      Math.round(item.monthlyCost),
+      `"${item.daysRemaining <= 2 ? 'Kritis' : item.daysRemaining <= 5 ? 'Warning' : 'Aman'} (${item.daysRemaining} hari)"`,
+    ]);
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Laporan_Analisis_Listrik_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const getStatusBadge = (days: number) => {
     if (days <= 2) {
       return (
-        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400 flex items-center gap-1 w-fit">
+        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-rose-100 text-rose-700 flex items-center gap-1 w-fit">
           <AlertCircle className="w-3 h-3" /> Kritis ({days} Hari)
         </span>
       );
     } else if (days <= 5) {
       return (
-        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 flex items-center gap-1 w-fit">
+        <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-700 flex items-center gap-1 w-fit">
           <AlertTriangle className="w-3 h-3" /> Warning ({days} Hari)
         </span>
       );
     }
     return (
-      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 flex items-center gap-1 w-fit">
+      <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-700 flex items-center gap-1 w-fit">
         <ShieldCheck className="w-3 h-3" /> Aman ({days === 99 ? 'N/A' : `${days} Hari`})
       </span>
     );
   };
 
-  // Estimasi Beban Perangkat (Per Hari)
   const deviceEstimates = [
     {
       name: 'AC & Pendingin Toko',
@@ -258,27 +295,37 @@ export default function AnalysisPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header & Filter Dropdown */}
+      {/* Header & Control Actions */}
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Analisis Pemakaian</h1>
           <p className="text-xs text-slate-500">Laju konsumsi jam-jaman & instruksi hemat toko</p>
         </div>
 
-        {meters.length > 0 && (
-          <select
-            value={selectedMeterId}
-            onChange={(e) => setSelectedMeterId(e.target.value)}
-            className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500"
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleExportCSV}
+            className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold gap-1 px-2.5 h-8 shadow-sm"
           >
-            <option value="all">Semua Toko ({meters.length})</option>
-            {meters.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.store_name}
-              </option>
-            ))}
-          </select>
-        )}
+            <Download className="w-3.5 h-3.5" /> CSV
+          </Button>
+
+          {meters.length > 0 && userRole === 'admin' && (
+            <select
+              value={selectedMeterId}
+              onChange={(e) => setSelectedMeterId(e.target.value)}
+              className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500"
+            >
+              <option value="all">Semua Toko ({meters.length})</option>
+              {meters.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.store_name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -288,14 +335,14 @@ export default function AnalysisPage() {
         </div>
       ) : (
         <>
-          {/* TABEL PERBANDINGAN SEMUA TOKO (Hanya Tampil Jika Mode 'Semua Toko' atau Memiliki >1 Toko) */}
+          {/* TABEL PERBANDINGAN SEMUA TOKO */}
           {storeAnalysisList.length > 0 && (
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm flex items-center justify-between text-slate-800">
                   <div className="flex items-center gap-2">
                     <Building2 className="w-4 h-4 text-teal-700" />
-                    <span>Matriks Konsumsi Semua Toko</span>
+                    <span>Matriks Konsumsi Toko</span>
                   </div>
                   <span className="text-[10px] font-normal text-slate-500">
                     Urutan berdasarkan risiko token habis
@@ -348,7 +395,7 @@ export default function AnalysisPage() {
             </Card>
           )}
 
-          {/* BANNER PERINGATAN LONJAKAN & CHECKLIST AKSI ANAK TOKO */}
+          {/* BANNER PERINGATAN LONJAKAN */}
           {isSpike ? (
             <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl text-xs space-y-3 shadow-sm">
               <div className="flex items-center justify-between">
@@ -365,7 +412,6 @@ export default function AnalysisPage() {
                 Pemakaian di jam ini terdeteksi tinggi! Anak toko disarankan segera melakukan pengecekan berikut:
               </p>
 
-              {/* Checklist Cepat Lapangan */}
               <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-2 text-slate-800 font-medium">
                 <div className="flex items-start gap-2">
                   <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
@@ -393,15 +439,6 @@ export default function AnalysisPage() {
                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span>Pemakaian jam berjalan dalam batas normal ({hourlyRate.toFixed(2)} kWh/jam).</span>
               </div>
-            </div>
-          )}
-
-          {isTestInterval && !isSpike && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-xl text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>
-                Interval pindaian kurang dari 15 menit. Proyeksi menggunakan pemakaian riil tanpa ekstrapolasi mikro.
-              </span>
             </div>
           )}
 
@@ -490,7 +527,7 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
 
-          {/* Rekomendasi Hemat Energi Panduan Umum */}
+          {/* Rekomendasi Hemat Energi */}
           <Card className="border-emerald-200 bg-emerald-50/30 shadow-sm">
             <CardHeader className="pb-2 border-b border-emerald-100">
               <CardTitle className="text-sm flex items-center justify-between text-emerald-900">
