@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Store, LogIn, Loader2, PlusCircle, Lock, CreditCard } from 'lucide-react';
@@ -12,7 +12,7 @@ export default function LoginPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [meterNumber, setMeterNumber] = useState('');
+  const [identifier, setIdentifier] = useState(''); // Mengakomodasi Kode Toko atau Nomor Meter
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -23,24 +23,39 @@ export default function LoginPage() {
     setErrorMessage(null);
 
     try {
-      // 1. Cek kecocokan Nomor Meter DAN Password di database
-      const { data: meter, error } = await supabase
+      const cleanInput = identifier.trim();
+
+      // 1. Cari toko berdasarkan Kode/Nama Toko ATAU Nomor Meter
+      const { data: meters, error } = await supabase
         .from('meters')
         .select('*')
-        .eq('meter_number', meterNumber.trim())
-        .eq('password', password.trim())
-        .single();
+        .or(`meter_number.eq.${cleanInput},store_name.ilike.%${cleanInput}%`);
 
-      if (error || !meter) {
-        throw new Error('Nomor Meter atau Kata Sandi Toko salah!');
+      if (error || !meters || meters.length === 0) {
+        throw new Error('Kode Toko atau Nomor Meter tidak ditemukan!');
       }
 
-      // 2. Jika valid, simpan session toko aktif ke LocalStorage
-      localStorage.setItem('active_store_id', meter.id);
-      localStorage.setItem('active_store_name', meter.name || meter.store_name);
-      localStorage.setItem('active_meter_number', meter.meter_number);
+      // Ambil hasil pencocokan pertama
+      const matchedMeter = meters[0];
 
-      // 3. Masuk ke Dashboard Utama
+      // 2. Cek kecocokan Kata Sandi Toko
+      if (matchedMeter.password !== password.trim()) {
+        throw new Error('Kata Sandi Toko salah!');
+      }
+
+      // 3. Simpan session toko aktif & role pengguna ke LocalStorage
+      localStorage.setItem('active_store_id', matchedMeter.id);
+      localStorage.setItem('active_store_name', matchedMeter.store_name || matchedMeter.name);
+      localStorage.setItem('active_meter_number', matchedMeter.meter_number);
+      
+      // Simpan role jika ada di database, jika tidak default ke 'staff'
+      if (matchedMeter.role) {
+        localStorage.setItem('user_role', matchedMeter.role);
+      } else {
+        localStorage.setItem('user_role', 'staff');
+      }
+
+      // 4. Masuk ke Dashboard Utama
       router.push('/');
       router.refresh();
     } catch (err: any) {
@@ -61,13 +76,13 @@ export default function LoginPage() {
             Masuk Listrik Jenius
           </CardTitle>
           <p className="text-xs text-slate-500">
-            Gunakan Nomor Meter & Kata Sandi Toko
+            Gunakan Kode Toko / Nomor Meter & Kata Sandi
           </p>
         </CardHeader>
 
         <CardContent className="space-y-4 pt-2">
           {errorMessage && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+            <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
               {errorMessage}
             </div>
           )}
@@ -75,15 +90,15 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-3">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                <CreditCard className="w-3.5 h-3.5 text-slate-400" /> Nomor Meter / ID Pelanggan
+                <CreditCard className="w-3.5 h-3.5 text-slate-400" /> Kode Toko / Nomor Meter
               </label>
               <input
                 type="text"
                 required
-                value={meterNumber}
-                onChange={(e) => setMeterNumber(e.target.value)}
-                placeholder="Contoh: 14028821992"
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 font-mono"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="Contoh: VB04 atau 14028821992"
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 font-medium"
               />
             </div>
 
