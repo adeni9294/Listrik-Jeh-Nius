@@ -119,79 +119,78 @@ export default function ScanPage() {
     }
   };
 
-  // Simpan Data ke Supabase
-  const handleSave = async () => {
-    if (!validationResult) return;
+ // Simpan Data ke Supabase
+const handleSave = async () => {
+  if (!validationResult) return;
 
-    if (!selectedMeterId && meters.length > 0) {
-      alert('Pilih toko terlebih dahulu!');
-      return;
-    }
+  if (!selectedMeterId && meters.length > 0) {
+    alert('Pilih toko terlebih dahulu!');
+    return;
+  }
 
-    const finalKwh = parseFloat(manualValue);
-    if (isNaN(finalKwh) || finalKwh <= 0) {
-      alert('Masukkan angka kWh yang valid.');
-      return;
-    }
+  const finalKwh = parseFloat(manualValue);
+  if (isNaN(finalKwh) || finalKwh <= 0) {
+    alert('Masukkan angka kWh yang valid.');
+    return;
+  }
 
-    setIsSaving(true);
+  setIsSaving(true);
+  try {
+    // 1) coba ambil user Supabase (jika tersedia)
+    let userId: string | undefined = undefined;
     try {
-      // Coba ambil user Supabase (jika ada)
-      let userId: string | undefined = undefined;
-      try {
-        const { data: userData, error: userErr } = await supabase.auth.getUser();
-        if (userErr) console.warn('getUser error', userErr);
-        userId = userData?.user?.id;
-      } catch (e) {
-        console.warn('Supabase getUser failed:', e);
-      }
-
-      // Jika tidak ada session Supabase, fallback ke login lokal (LocalStorage)
-      const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
-
-      if (!userId && !activeStoreId) {
-        // Tidak ada autentikasi sama sekali
-        alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
-        router.push('/login');
-        return;
-      }
-
-      const payload: Record<string, any> = {
-        kwh: finalKwh,
-        meter_value: finalKwh,
-        confidence: isEditing ? 100 : validationResult.confidence,
-        reading_date: new Date().toISOString().split('T')[0],
-        reading_time: new Date().toTimeString().split(' ')[0],
-        created_at: new Date().toISOString(),
-        meter_id: selectedMeterId || activeStoreId,
-      };
-
-      if (userId) payload.user_id = userId;
-
-      // Insert dan kembalikan row yang baru disimpan
-      const { data: insertedRow, error: insertError } = await supabase
-        .from('meter_readings')
-        .insert([payload])
-        .select()
-        .single();
-
-      console.log('Inserted meter_reading:', { payload, insertedRow, insertError });
-
-      if (insertError) throw insertError;
-
-      // Tampilkan ringkasan singkat ke user
-      alert(`Tersimpan: ${insertedRow.kwh} kWh (meter: ${insertedRow.meter_id})`);
-
-      // Refresh dashboard / halaman utama
-      router.replace('/');
-      router.refresh();
-    } catch (err: any) {
-      console.error('Gagal menyimpan ke Supabase:', err);
-      alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
-    } finally {
-      setIsSaving(false);
+      const { data: userData, error: userErr } = await supabase.auth.getUser();
+      if (userErr) console.warn('getUser error', userErr);
+      userId = userData?.user?.id;
+    } catch (e) {
+      console.warn('Supabase getUser failed:', e);
     }
-  };
+
+    // 2) fallback: ambil active_store_id dari localStorage (login lokal)
+    const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
+
+    // 3) jika keduanya tidak ada -> minta login
+    if (!userId && !activeStoreId) {
+      alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
+      router.push('/login');
+      return;
+    }
+
+    // 4) susun payload; prioritaskan selectedMeterId, lalu activeStoreId
+    const payload: Record<string, any> = {
+      kwh: finalKwh,
+      meter_value: finalKwh,
+      confidence: isEditing ? 100 : validationResult.confidence,
+      reading_date: new Date().toISOString().split('T')[0],
+      reading_time: new Date().toTimeString().split(' ')[0],
+      created_at: new Date().toISOString(),
+      meter_id: selectedMeterId || activeStoreId,
+    };
+
+    // hanya sertakan user_id jika Supabase session ada (untuk RLS)
+    if (userId) payload.user_id = userId;
+
+    // 5) insert dan ambil inserted row
+    const { data: insertedRow, error: insertError } = await supabase
+      .from('meter_readings')
+      .insert([payload])
+      .select()
+      .single();
+
+    console.log('Inserted meter_reading:', { payload, insertedRow, insertError });
+
+    if (insertError) throw insertError;
+
+    alert(`Tersimpan: ${insertedRow.kwh} kWh (meter: ${insertedRow.meter_id})`);
+    router.replace('/');
+    router.refresh();
+  } catch (err: any) {
+    console.error('Gagal menyimpan ke Supabase:', err);
+    alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
