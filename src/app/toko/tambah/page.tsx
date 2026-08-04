@@ -5,7 +5,16 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Store, Zap, CreditCard, ArrowLeft, Loader2, Lock } from 'lucide-react';
+import {
+  Store,
+  Zap,
+  CreditCard,
+  ArrowLeft,
+  Loader2,
+  Lock,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import Link from 'next/link';
 
 export default function TambahTokoPage() {
@@ -16,6 +25,7 @@ export default function TambahTokoPage() {
   const [meterNumber, setMeterNumber] = useState('');
   const [powerVa, setPowerVa] = useState('11000'); // Default ke 11 kVA untuk standar retail
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -25,6 +35,10 @@ export default function TambahTokoPage() {
     setErrorMessage(null);
 
     try {
+      if (!storeName.trim() || !meterNumber.trim() || !password.trim()) {
+        throw new Error('Mohon lengkapi semua kolom yang wajib diisi.');
+      }
+
       // 1. Insert Toko / Meteran Baru beserta Kata Sandi & Role Default
       const { data: inserted, error: insertError } = await supabase
         .from('meters')
@@ -41,14 +55,27 @@ export default function TambahTokoPage() {
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        if (insertError.code === '23505') {
+          throw new Error('Nomor Meter atau Nama Toko ini sudah terdaftar.');
+        }
+        throw insertError;
+      }
 
       // 2. Otomatis login dengan menyimpan session toko aktif ke LocalStorage
       if (inserted) {
         localStorage.setItem('active_store_id', inserted.id);
-        localStorage.setItem('active_store_name', inserted.name || inserted.store_name);
-        localStorage.setItem('active_meter_number', inserted.meter_number);
+        localStorage.setItem(
+          'active_store_name',
+          inserted.name || inserted.store_name
+        );
+        localStorage.setItem('active_meter_number', inserted.meter_number || '');
         localStorage.setItem('user_role', 'staff');
+
+        // Dispatch Custom Event agar komponen Navigasi/Header merespons perubahan toko
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('store_changed'));
+        }
       }
 
       // 3. Berhasil -> Redirect ke Dashboard
@@ -56,7 +83,9 @@ export default function TambahTokoPage() {
       router.refresh();
     } catch (err: any) {
       console.error('Gagal menambah toko:', err);
-      setErrorMessage(err?.message || 'Terjadi kesalahan saat menyimpan data toko.');
+      setErrorMessage(
+        err?.message || 'Terjadi kesalahan saat menyimpan data toko.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -85,7 +114,7 @@ export default function TambahTokoPage() {
         </CardHeader>
         <CardContent className="pt-2">
           {errorMessage && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium leading-relaxed">
               {errorMessage}
             </div>
           )}
@@ -101,7 +130,7 @@ export default function TambahTokoPage() {
                 placeholder="Contoh: VB04 - Toko Pasar Anyar"
                 value={storeName}
                 onChange={(e) => setStoreName(e.target.value)}
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-medium"
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-medium text-slate-800"
               />
             </div>
 
@@ -115,7 +144,7 @@ export default function TambahTokoPage() {
                 placeholder="Contoh: 14028821992"
                 value={meterNumber}
                 onChange={(e) => setMeterNumber(e.target.value)}
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-mono"
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-mono text-slate-800"
               />
             </div>
 
@@ -155,20 +184,33 @@ export default function TambahTokoPage() {
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
                 <Lock className="w-3.5 h-3.5 text-slate-400" /> Kata Sandi Toko / PIN
               </label>
-              <input
-                type="password"
-                required
-                placeholder="Buat Kata Sandi / PIN Toko"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Buat Kata Sandi / PIN Toko"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition text-slate-800 pr-9"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition"
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl shadow-sm mt-2"
+              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl shadow-sm mt-2 transition"
             >
               {isSubmitting ? (
                 <>
