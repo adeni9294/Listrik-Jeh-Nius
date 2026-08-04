@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Camera, RefreshCw, Edit3, Check, Store } from 'lucide-react';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase';
 
 interface Meter {
   id: string;
