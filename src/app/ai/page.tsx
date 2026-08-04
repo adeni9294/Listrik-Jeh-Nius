@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Cpu, RefreshCw, AlertTriangle, CheckCircle2, ShoppingBag, ExternalLink, BatteryCharging } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getTariffRate, TARIF_PLN } from '@/lib/constants';
 
 interface Meter {
   id: string;
@@ -35,8 +36,6 @@ export default function AiPage() {
   const [recCost, setRecCost] = useState<number>(0);
   const [recKwh, setRecKwh] = useState<number>(0);
 
-  const TARIF_PER_KWH = 1444.7; // PLN Non-Subsidi
-
   useEffect(() => {
     fetchAiInsight();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -45,12 +44,16 @@ export default function AiPage() {
   const fetchAiInsight = async () => {
     setLoading(true);
     try {
-      // 1. Ambil daftar toko
-      if (meters.length === 0) {
+      // 1. Ambil daftar toko jika belum terisi
+      let currentMeters = meters;
+      if (currentMeters.length === 0) {
         const { data: metersData } = await supabase
           .from('meters')
           .select('id, store_name, meter_number, power_va');
-        if (metersData) setMeters(metersData);
+        if (metersData) {
+          setMeters(metersData);
+          currentMeters = metersData;
+        }
       }
 
       // 2. Tentukan toko yang dievaluasi
@@ -64,6 +67,11 @@ export default function AiPage() {
         setLoading(false);
         return;
       }
+
+      // Ambil data detail meteran target untuk mengetahui power_va
+      const activeMeterInfo = currentMeters.find((m) => m.id === targetMeterId);
+      const activePowerVa = activeMeterInfo?.power_va || 1300;
+      const currentTariffRate = getTariffRate(activePowerVa);
 
       // 3. Ambil 2 pindaian terakhir untuk menghitung laju riil
       const { data: readings } = await supabase
@@ -107,11 +115,11 @@ export default function AiPage() {
 
               // Hitung Rekomendasi Token AI (Untuk Kebutuhan 14 Hari Operasional Toko)
               const neededKwhFor14Days = calculatedDaily * 14;
-              const rawCost = neededKwhFor14Days * TARIF_PER_KWH;
+              const rawCost = neededKwhFor14Days * currentTariffRate;
 
               // Pembulatan ke kelipatan Rp 100.000 terdekat
               const roundedCost = Math.max(Math.ceil(rawCost / 100000) * 100000, 100000);
-              const resultingKwh = roundedCost / TARIF_PER_KWH;
+              const resultingKwh = roundedCost / currentTariffRate;
 
               setRecCost(roundedCost);
               setRecKwh(resultingKwh);
