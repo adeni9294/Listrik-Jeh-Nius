@@ -243,7 +243,7 @@ const handleSave = async () => {
         {isProcessing && (
           <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center text-white space-y-3">
             <RefreshCw className="w-8 h-8 animate-spin text-teal-400" />
-            <span className="text-xs font-semibold">Gemini AI sedang membaca & memvalidasi angka...</span>
+            <span className="text-xs font-semibold">sedang membaca & memvalidasi angka...</span>
           </div>
         )}
       </div>
@@ -268,7 +268,7 @@ const handleSave = async () => {
       {validationResult && (
         <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex justify-between items-center border-b pb-2">
-            <span className="text-xs font-semibold text-slate-500">Hasil Pembacaan Gemini AI</span>
+            <span className="text-xs font-semibold text-slate-500">Hasil Pembacaan AI</span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
