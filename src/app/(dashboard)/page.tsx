@@ -7,7 +7,6 @@ import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut }
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { computeConsumption } from '@/lib/consumption';
 
 interface MeterWithReading {
   id: string;
@@ -17,8 +16,6 @@ interface MeterWithReading {
   lastReading: number | null;
   monthlyUsage: number;
   perDay?: number;
-  anomaliesCount?: number;
-  hasRollover?: boolean;
 }
 
 export default function DashboardPage() {
@@ -40,7 +37,6 @@ export default function DashboardPage() {
   const [daysLeft, setDaysLeft] = useState<number>(0);
 
   useEffect(() => {
-    // Jangan otomatis redirect berdasarkan localStorage — ambil data dulu
     const storedStoreId = localStorage.getItem('active_store_id');
     if (storedStoreId) setActiveStoreId(storedStoreId);
 
@@ -59,25 +55,19 @@ export default function DashboardPage() {
 
       if (metersError) throw metersError;
 
-      console.log('Fetched meters:', meters);
-
       if (!meters || meters.length === 0) {
         setMetersData([]);
         setLoading(false);
-        // Jika tidak ada toko, arahkan pengguna ke halaman tambah toko
-        // tapi beri sedikit delay supaya UI tidak langsung lompat
         setTimeout(() => router.push('/toko/tambah'), 500);
         return;
       }
 
-      // Jika tidak ada activeStoreId di localStorage, set yang pertama sebagai default
       const storedStoreId = localStorage.getItem('active_store_id');
       if (!storedStoreId) {
         const first = meters[0];
         localStorage.setItem('active_store_id', first.id);
         localStorage.setItem('active_store_name', first.store_name || 'Toko');
         setActiveStoreId(first.id);
-        console.log('No active_store_id found, defaulting to:', first.id);
       }
 
       // Hitung Tanggal Awal Bulan Ini
@@ -88,50 +78,68 @@ export default function DashboardPage() {
       let accumLastReadings = 0;
       const computedMeters: MeterWithReading[] = [];
 
-      // 2. Query bacaan untuk setiap toko
+      // 2. Query dan hitung bacaan untuk setiap toko
       for (const m of meters) {
-        // Ambil bacaan paling terakhir
-        const { data: latest, error: latestErr } = await supabase
-          .from('meter_readings')
-          .select('kwh, created_at')
-          .eq('meter_id', m.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (latestErr) console.warn(`Error fetching latest for ${m.id}:`, latestErr);
-
-        // Ambil semua bacaan bulan ini
+        // Ambil SEMUA bacaan bulan ini (diurutkan TERBARU -> TERLAMA)
         const { data: monthReadings, error: monthErr } = await supabase
           .from('meter_readings')
-          .select('id, kwh, created_at')
+          .select('id, kwh, meter_value, created_at')
           .eq('meter_id', m.id)
           .gte('created_at', firstDayOfMonth)
-          .order('created_at', { ascending: true });
+          .order('created_at', { ascending: false });
 
         if (monthErr) console.warn(`Error fetching month readings for ${m.id}:`, monthErr);
 
-        console.log(`Meter ${m.id} - latest:`, latest, 'monthReadings:', monthReadings?.length);
-
         let storeMonthlyUsage = 0;
         let storePerDay = 0;
-        let anomaliesCount = 0;
-        let hasRollover = false;
+        const lastVal = monthReadings && monthReadings.length > 0 
+          ? Number(monthReadings[0].meter_value ?? monthReadings[0].kwh ?? 0) 
+          : null;
 
-        if (monthReadings && monthReadings.length > 1) {
-          const scans = monthReadings.map((r: any) => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at, id: r.id }));
-          const summary = computeConsumption(scans, { maxMeterValue: 99999 });
+        if (monthReadings && monthReadings.length >= 2) {
+          // Normalisasi array data
+          const readings = monthReadings.map((r: any) => ({
+            kwh: Number(r.meter_value ?? r.kwh ?? 0),
+            created_at: new Date(r.created_at).getTime(),
+          }));
 
-          // total usage this month (sum of positive deltas across valid intervals)
-          storeMonthlyUsage = summary.intervals.filter((i) => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0);
-          storePerDay = summary.kwhPerHourUsedForProjection * 24;
+          // Hitung total pemakaian bulan ini & laju pemakaian
+          for (let i = 0; i < readings.length - 1; i++) {
+            const current = readings[i];     // Scan lebih baru
+            const previous = readings[i + 1]; // Scan lebih lama
 
-          anomaliesCount = summary.intervals.filter(i => !i.valid).length;
-          hasRollover = summary.intervals.some(i => i.isRollover === true);
+            // 💡 SISA TOKEN PRABAYAR: Pemakaian = Previous - Current
+            if (previous.kwh >= current.kwh) {
+              const delta = previous.kwh - current.kwh;
+              storeMonthlyUsage += delta;
+            } else {
+              // 💡 Jika Current > Previous -> USER ISI REFILL/TOP-UP TOKEN!
+              // Jangan hitung sebagai rollover/pemakaian gila-gilaan
+            }
+          }
+
+          // Hitung Laju Konsumsi dari 2 Scan TERBARU
+          const latest = readings[0];
+          const prevLatest = readings[1];
+
+          if (prevLatest.kwh >= latest.kwh) {
+            const latestDelta = prevLatest.kwh - latest.kwh;
+            const hoursDiff = (latest.created_at - prevLatest.created_at) / (1000 * 60 * 60);
+
+            // Safety check: Minimal selisih 15 menit (0.25 jam) agar angka tidak meledak saat testing
+            if (hoursDiff >= 0.25) {
+              const hourlyRate = latestDelta / hoursDiff;
+              storePerDay = hourlyRate * 24; // Proyeksi 24 jam
+            } else {
+              // Jika < 15 menit, gunakan pemakaian flat langsung sebagai perkiraan dasar
+              storePerDay = storeMonthlyUsage;
+            }
+          }
         }
 
-        const lastVal = latest ? latest.kwh : 0;
-        accumLastReadings += lastVal;
+        if (lastVal !== null) {
+          accumLastReadings += lastVal;
+        }
         accumKwhAllStores += storeMonthlyUsage;
 
         computedMeters.push({
@@ -139,11 +147,9 @@ export default function DashboardPage() {
           store_name: m.store_name || m.name,
           meter_number: m.meter_number,
           power_va: m.power_va || 1300,
-          lastReading: latest ? latest.kwh : null,
+          lastReading: lastVal,
           monthlyUsage: storeMonthlyUsage,
           perDay: storePerDay,
-          anomaliesCount,
-          hasRollover,
         });
       }
 
@@ -151,12 +157,14 @@ export default function DashboardPage() {
       setTotalKwhMonth(accumKwhAllStores);
       setRemainingTokenKwh(accumLastReadings);
 
-      // Hitung Estimasi Hari Sisa Token (gunakan per-day aktual dari setiap meter)
+      // Hitung Estimasi Sisa Hari Token
       const totalDailyUsage = computedMeters.reduce((s, mm) => s + (mm.perDay || 0), 0);
-      const estimatedDays = totalDailyUsage > 0 ? Math.floor(accumLastReadings / totalDailyUsage) : 0;
+      const estimatedDays = totalDailyUsage > 0 
+        ? Math.max(0, Math.floor(accumLastReadings / totalDailyUsage)) 
+        : 0;
       setDaysLeft(estimatedDays);
 
-      // Metrik AI berdasarkan keaktifan pindaian
+      // Metrik AI
       const score = Math.min(98, 75 + meters.length * 5);
       setIntelligenceScore(score);
 
@@ -167,16 +175,14 @@ export default function DashboardPage() {
     }
   };
 
-  // Realtime subscription: update dashboard when meter_readings change
+  // Realtime subscription
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     const channel = supabase
       .channel('public:meter_readings')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'meter_readings' },
-        (payload: any) => {
-          console.log('Realtime change on meter_readings:', payload);
+        () => {
           fetchDashboardData();
         }
       )
@@ -198,7 +204,7 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  // Filter Toko yang Tampil
+  // Filter Toko
   const filteredMeters = selectedMeterId === 'all'
     ? metersData
     : metersData.filter(m => m.id === selectedMeterId);
@@ -350,19 +356,6 @@ export default function DashboardPage() {
                         <p className="text-[11px] text-slate-500">
                           PLN ID: <span className="font-mono text-slate-700">{m.meter_number}</span> • {m.power_va} VA
                         </p>
-
-                        <div className="flex items-center gap-2 mt-2">
-                          {m.hasRollover && (
-                            <span className="text-[10px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-200">
-                              Rollover Terdeteksi
-                            </span>
-                          )}
-                          {m.anomaliesCount && m.anomaliesCount > 0 && (
-                            <span className="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200">
-                              {m.anomaliesCount} Anomali
-                            </span>
-                          )}
-                        </div>
                       </div>
                       <span className="text-[10px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-full font-bold border border-teal-200">
                         Aktif
@@ -398,7 +391,7 @@ export default function DashboardPage() {
             <CardContent className="p-4 pt-0 text-xs text-slate-700 space-y-2">
               <p>
                 Rata-rata konsumsi harian dari <strong>{metersData.length} toko</strong> Anda stabil di angka{' '}
-                <strong>{(totalKwhMonth / 30 || 4).toFixed(1)} kWh/hari</strong>.
+                <strong>{(totalKwhMonth / (new Date().getDate()) || 0).toFixed(1)} kWh/hari</strong>.
               </p>
               <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
                 💡 <strong>Rekomendasi Gemini AI:</strong> Isi ulang token disarankan ketika sisa token berada di bawah{' '}
