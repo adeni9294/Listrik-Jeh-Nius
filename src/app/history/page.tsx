@@ -121,7 +121,7 @@ export default function HistoryPage() {
       }
     } catch (err: any) {
       console.error('Gagal mengambil riwayat:', err?.message || err);
-    } fontally {
+    } finally {
       setLoading(false);
     }
   };
