@@ -49,7 +49,7 @@ export default function ScanPage() {
         }
       } catch (err: any) {
         console.error('Gagal mengambil data toko:', err.message);
-      } fontly {
+      } finally {
         setIsLoadingMeters(false);
       }
     };
