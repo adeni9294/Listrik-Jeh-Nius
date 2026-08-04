@@ -1,6 +1,7 @@
 // src/lib/meterReadingsClient.ts
 
 import { createClient } from "@/lib/supabase/client";
+import { computeConsumption, Scan } from "./consumption";
 
 const supabase = createClient();
 
@@ -157,20 +158,23 @@ export async function deleteReading(id: string) {
 
 /**
  * Pemakaian hari ini
+ *
+ * Perubahan: gunakan computeConsumption untuk mendapatkan interval terbaru dan mengkalkulasi usage.
  */
 export function computeDailyUsage(
   readings: Reading[]
 ): number {
-  if (readings.length < 2) return 0;
+  if (!Array.isArray(readings) || readings.length < 2) return 0;
 
-  const latest = readings[0];
-  const previous = readings[1];
+  // Build scans chronological (oldest -> newest)
+  const scans: Scan[] = readings
+    .map(r => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  const usage =
-    Number(previous.kwh) -
-    Number(latest.kwh);
+  const summary = computeConsumption(scans, { maxMeterValue: 99999 });
 
-  return usage > 0 ? usage : 0;
+  // latestInterval.deltaKwh adalah newer - older
+  return summary.latestInterval ? Math.max(0, summary.latestInterval.deltaKwh) : 0;
 }
 
 /**
@@ -179,19 +183,16 @@ export function computeDailyUsage(
 export function getTotalUsage(
   readings: Reading[]
 ): number {
-  if (readings.length < 2) return 0;
+  if (!Array.isArray(readings) || readings.length < 2) return 0;
 
-  let total = 0;
+  const scans: Scan[] = readings
+    .map(r => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-  for (let i = 0; i < readings.length - 1; i++) {
-    const diff =
-      readings[i + 1].kwh -
-      readings[i].kwh;
+  const summary = computeConsumption(scans, { maxMeterValue: 99999 });
 
-    if (diff > 0) total += diff;
-  }
-
-  return total;
+  // jumlahkan deltaKwh hanya dari interval valid
+  return summary.intervals.filter(i => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0);
 }
 
 /**
@@ -200,10 +201,17 @@ export function getTotalUsage(
 export function getStatistics(
   readings: Reading[]
 ) {
+  const scans: Scan[] = (readings || [])
+    .map(r => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  const summary = computeConsumption(scans, { maxMeterValue: 99999 });
+
   return {
     totalReading: readings.length,
-    dailyUsage: computeDailyUsage(readings),
-    totalUsage: getTotalUsage(readings),
+    dailyUsage: summary.latestInterval ? Math.max(0, summary.latestInterval.deltaKwh) : 0,
+    totalUsage: summary.intervals.filter(i => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0),
     latest: readings[0] ?? null,
+    consumptionSummary: summary,
   };
 }

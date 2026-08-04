@@ -7,6 +7,7 @@ import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut }
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { computeConsumption } from '@/lib/consumption';
 
 interface MeterWithReading {
   id: string;
@@ -15,6 +16,9 @@ interface MeterWithReading {
   power_va: number;
   lastReading: number | null;
   monthlyUsage: number;
+  perDay?: number;
+  anomaliesCount?: number;
+  hasRollover?: boolean;
 }
 
 export default function DashboardPage() {
@@ -89,7 +93,7 @@ export default function DashboardPage() {
         // Ambil bacaan paling terakhir
         const { data: latest, error: latestErr } = await supabase
           .from('meter_readings')
-          .select('kwh')
+          .select('kwh, created_at')
           .eq('meter_id', m.id)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -100,7 +104,7 @@ export default function DashboardPage() {
         // Ambil semua bacaan bulan ini
         const { data: monthReadings, error: monthErr } = await supabase
           .from('meter_readings')
-          .select('kwh')
+          .select('id, kwh, created_at')
           .eq('meter_id', m.id)
           .gte('created_at', firstDayOfMonth)
           .order('created_at', { ascending: true });
@@ -110,10 +114,20 @@ export default function DashboardPage() {
         console.log(`Meter ${m.id} - latest:`, latest, 'monthReadings:', monthReadings?.length);
 
         let storeMonthlyUsage = 0;
+        let storePerDay = 0;
+        let anomaliesCount = 0;
+        let hasRollover = false;
+
         if (monthReadings && monthReadings.length > 1) {
-          const firstKwh = monthReadings[0].kwh;
-          const lastKwh = monthReadings[monthReadings.length - 1].kwh;
-          storeMonthlyUsage = Math.max(0, firstKwh - lastKwh);
+          const scans = monthReadings.map((r: any) => ({ kwh: Number(r.kwh ?? 0), created_at: r.created_at, id: r.id }));
+          const summary = computeConsumption(scans, { maxMeterValue: 99999 });
+
+          // total usage this month (sum of positive deltas across valid intervals)
+          storeMonthlyUsage = summary.intervals.filter((i) => i.valid).reduce((s, it) => s + Math.max(0, it.deltaKwh), 0);
+          storePerDay = summary.kwhPerHourUsedForProjection * 24;
+
+          anomaliesCount = summary.intervals.filter(i => !i.valid).length;
+          hasRollover = summary.intervals.some(i => i.isRollover === true);
         }
 
         const lastVal = latest ? latest.kwh : 0;
@@ -127,6 +141,9 @@ export default function DashboardPage() {
           power_va: m.power_va || 1300,
           lastReading: latest ? latest.kwh : null,
           monthlyUsage: storeMonthlyUsage,
+          perDay: storePerDay,
+          anomaliesCount,
+          hasRollover,
         });
       }
 
@@ -134,10 +151,9 @@ export default function DashboardPage() {
       setTotalKwhMonth(accumKwhAllStores);
       setRemainingTokenKwh(accumLastReadings);
 
-      // Hitung Estimasi Hari Sisa Token (Rata-rata konsumsi 4 kWh / hari per toko)
-      const avgDailyUsagePerStore = 4;
-      const totalDailyUsage = meters.length * avgDailyUsagePerStore;
-      const estimatedDays = totalDailyUsage > 0 ? Math.round(accumLastReadings / totalDailyUsage) : 0;
+      // Hitung Estimasi Hari Sisa Token (gunakan per-day aktual dari setiap meter)
+      const totalDailyUsage = computedMeters.reduce((s, mm) => s + (mm.perDay || 0), 0);
+      const estimatedDays = totalDailyUsage > 0 ? Math.floor(accumLastReadings / totalDailyUsage) : 0;
       setDaysLeft(estimatedDays);
 
       // Metrik AI berdasarkan keaktifan pindaian
@@ -334,6 +350,19 @@ export default function DashboardPage() {
                         <p className="text-[11px] text-slate-500">
                           PLN ID: <span className="font-mono text-slate-700">{m.meter_number}</span> • {m.power_va} VA
                         </p>
+
+                        <div className="flex items-center gap-2 mt-2">
+                          {m.hasRollover && (
+                            <span className="text-[10px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-200">
+                              Rollover Terdeteksi
+                            </span>
+                          )}
+                          {m.anomaliesCount && m.anomaliesCount > 0 && (
+                            <span className="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200">
+                              {m.anomaliesCount} Anomali
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span className="text-[10px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-full font-bold border border-teal-200">
                         Aktif
