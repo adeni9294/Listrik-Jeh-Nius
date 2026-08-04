@@ -139,11 +139,12 @@ export default function ScanPage() {
       // Cek user login
       const { data: { user } } = await supabase.auth.getUser();
 
-      const payload: Record<string, any> = {
+const payload: Record<string, any> = {
         kwh: finalKwh,
+        meter_value: finalKwh, // <-- Tambahkan baris ini agar meter_value terisi!
         confidence: isEditing ? 100 : validationResult.confidence,
-        reading_date: new Date().toISOString().split('T')[0], // Mengisi reading_date (YYYY-MM-DD)
-        reading_time: new Date().toTimeString().split(' ')[0], // Mengisi reading_time (HH:MM:SS)
+        reading_date: new Date().toISOString().split('T')[0],
+        reading_time: new Date().toTimeString().split(' ')[0],
         created_at: new Date().toISOString(),
       };
 
