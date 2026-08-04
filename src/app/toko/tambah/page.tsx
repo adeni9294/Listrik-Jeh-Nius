@@ -23,7 +23,7 @@ export default function TambahTokoPage() {
 
   const [storeName, setStoreName] = useState('');
   const [meterNumber, setMeterNumber] = useState('');
-  const [powerVa, setPowerVa] = useState('11000'); // Default ke 11 kVA untuk standar retail
+  const [powerVa, setPowerVa] = useState('11000');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -39,7 +39,7 @@ export default function TambahTokoPage() {
         throw new Error('Mohon lengkapi semua kolom yang wajib diisi.');
       }
 
-      // 1. Insert Toko / Meteran Baru (Kolom 'role' telah dihapus agar tidak terjadi error schema cache)
+      // 1. Insert Toko dengan Role 'staff'
       const { data: inserted, error: insertError } = await supabase
         .from('meters')
         .insert([
@@ -49,6 +49,7 @@ export default function TambahTokoPage() {
             meter_number: meterNumber.trim(),
             power_va: parseInt(powerVa),
             password: password.trim(),
+            role: 'staff', // Menyimpan role sebagai staff
           },
         ])
         .select()
@@ -61,7 +62,7 @@ export default function TambahTokoPage() {
         throw insertError;
       }
 
-      // 2. Otomatis login dengan menyimpan session toko aktif ke LocalStorage
+      // 2. Simpan Sesi Akses Lokal
       if (inserted) {
         localStorage.setItem('active_store_id', inserted.id);
         localStorage.setItem(
@@ -69,15 +70,13 @@ export default function TambahTokoPage() {
           inserted.name || inserted.store_name
         );
         localStorage.setItem('active_meter_number', inserted.meter_number || '');
-        localStorage.setItem('user_role', 'staff');
+        localStorage.setItem('user_role', inserted.role || 'staff');
 
-        // Dispatch Custom Event agar komponen Navigasi/Header merespons perubahan toko
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('store_changed'));
         }
       }
 
-      // 3. Berhasil -> Redirect ke Dashboard
       router.push('/');
       router.refresh();
     } catch (err: any) {
@@ -92,7 +91,6 @@ export default function TambahTokoPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header Navigation */}
       <div className="flex items-center gap-3">
         <Link href="/">
           <Button variant="ghost" size="icon" className="rounded-full w-9 h-9">
@@ -156,7 +154,6 @@ export default function TambahTokoPage() {
                 onChange={(e) => setPowerVa(e.target.value)}
                 className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-semibold text-slate-800"
               >
-                {/* Kategori Toko Modern / Minimarket */}
                 <optgroup label="Toko Modern / Minimarket (B2)">
                   <option value="6600">6.600 VA (B2)</option>
                   <option value="7700">7.700 VA (B2)</option>
@@ -167,8 +164,6 @@ export default function TambahTokoPage() {
                   <option value="33000">33.000 VA / 33 kVA (B2)</option>
                   <option value="41500">41.500 VA / 41,5 kVA (B2)</option>
                 </optgroup>
-
-                {/* Kategori Usaha Kecil / Ruko */}
                 <optgroup label="Usaha Kecil / Kelontong (B1 / R1)">
                   <option value="900">900 VA (R1 / B1)</option>
                   <option value="1300">1.300 VA (R1 / B1)</option>
