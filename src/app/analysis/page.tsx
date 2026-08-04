@@ -2,7 +2,21 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Clock, Zap, Wallet, RefreshCw, Cpu, Activity, AlertCircle, Lightbulb, Thermometer, ShieldCheck, Snowflake } from 'lucide-react';
+import {
+  Clock,
+  Zap,
+  Wallet,
+  RefreshCw,
+  Cpu,
+  Activity,
+  AlertCircle,
+  Lightbulb,
+  Thermometer,
+  ShieldCheck,
+  Snowflake,
+  TrendingUp,
+  CheckSquare,
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface Meter {
@@ -18,7 +32,7 @@ export default function AnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>(
-    typeof window !== 'undefined' ? (localStorage.getItem('active_store_id') || 'all') : 'all'
+    typeof window !== 'undefined' ? localStorage.getItem('active_store_id') || 'all' : 'all'
   );
 
   // Metrik berbasis jam & estimasi token
@@ -28,7 +42,12 @@ export default function AnalysisPage() {
   const [monthlyEstCost, setMonthlyEstCost] = useState<number>(0);
   const [isTestInterval, setIsTestInterval] = useState<boolean>(false);
 
+  // Status Lonjakan Jam Berjalan
+  const [isSpike, setIsSpike] = useState<boolean>(false);
+  const [spikePercent, setSpikePercent] = useState<number>(0);
+
   const TARIF_PER_KWH = 1444.7; // Tarif PLN Non-Subsidi B-1 / R-1
+  const NORMAL_HOURLY_THRESHOLD = 10.0; // Ambang batas normal (10 kWh/jam)
 
   useEffect(() => {
     fetchAnalysisData();
@@ -44,9 +63,7 @@ export default function AnalysisPage() {
           .select('id, store_name, meter_number, power_va')
           .order('created_at', { ascending: false });
 
-        if (metersData) {
-          setMeters(metersData);
-        }
+        if (metersData) setMeters(metersData);
       }
 
       if (selectedMeterId === 'all') {
@@ -113,13 +130,25 @@ export default function AnalysisPage() {
     const monthlyKwh = daily * 30;
     const monthlyCost = monthlyKwh * TARIF_PER_KWH;
 
+    // Evaluasi Lonjakan Pemakaian
+    if (ratePerHour > NORMAL_HOURLY_THRESHOLD) {
+      const diffPercent = Math.round(
+        ((ratePerHour - NORMAL_HOURLY_THRESHOLD) / NORMAL_HOURLY_THRESHOLD) * 100
+      );
+      setIsSpike(true);
+      setSpikePercent(diffPercent);
+    } else {
+      setIsSpike(false);
+      setSpikePercent(0);
+    }
+
     setHourlyRate(ratePerHour);
     setDailyAvgKwh(daily);
     setMonthlyEstKwh(monthlyKwh);
     setMonthlyEstCost(monthlyCost);
   };
 
-  // Estimasi Proporsi Alat Listrik Toko
+  // Estimasi Beban Perangkat (Per Hari)
   const deviceEstimates = [
     {
       name: 'AC & Pendingin Toko',
@@ -147,7 +176,6 @@ export default function AnalysisPage() {
     },
   ];
 
-  // Kalkulasi Potensi Hemat (Estimasi 15% dari total pengeluaran bulanan)
   const potentialSavingsMonthly = monthlyEstCost * 0.15;
 
   return (
@@ -156,7 +184,7 @@ export default function AnalysisPage() {
       <div className="flex justify-between items-start">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Analisis Pemakaian</h1>
-          <p className="text-xs text-slate-500">Laju konsumsi jam-jaman & estimasi budget token</p>
+          <p className="text-xs text-slate-500">Laju konsumsi jam-jaman & instruksi hemat toko</p>
         </div>
 
         {meters.length > 0 && (
@@ -182,7 +210,55 @@ export default function AnalysisPage() {
         </div>
       ) : (
         <>
-          {isTestInterval && (
+          {/* BANNER PERINGATAN LONJAKAN & CHECKLIST AKSI ANAK TOKO */}
+          {isSpike ? (
+            <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl text-xs space-y-3 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-rose-800 text-sm">
+                  <TrendingUp className="w-4 h-4 text-rose-600" />
+                  <span>LONJAKAN TERDETEKSI: {hourlyRate.toFixed(2)} kWh/jam</span>
+                </div>
+                <span className="bg-rose-200 text-rose-900 font-extrabold px-2 py-0.5 rounded text-[10px]">
+                  +{spikePercent}%
+                </span>
+              </div>
+
+              <p className="text-slate-700 leading-relaxed font-medium">
+                Pemakaian di jam ini terdeteksi tinggi! Anak toko disarankan segera melakukan pengecekan berikut:
+              </p>
+
+              {/* Checklist Cepat Lapangan */}
+              <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-2 text-slate-800 font-medium">
+                <div className="flex items-start gap-2">
+                  <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>AC Toko:</strong> Pastikan suhu remote dinaikkan ke <strong>23°C–24°C</strong> & pintu utama toko tertutup rapat.
+                  </span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Showcase Minuman:</strong> Cek apakah pintu kulkas/showcase renggang atau terbuka terlalu lama.
+                  </span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Penerangan:</strong> Matikan sebagian lampu sorot display/neon box luar jika siang hari cukup terang.
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-xs flex items-center justify-between text-emerald-800 font-medium">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Pemakaian jam berjalan dalam batas normal ({hourlyRate.toFixed(2)} kWh/jam).</span>
+              </div>
+            </div>
+          )}
+
+          {isTestInterval && !isSpike && (
             <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-xl text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
@@ -193,13 +269,13 @@ export default function AnalysisPage() {
 
           {/* 3 Overview Cards Utama */}
           <div className="grid grid-cols-3 gap-2">
-            <Card className="bg-slate-50 border-slate-200">
+            <Card className={`border-slate-200 ${isSpike ? 'bg-rose-50/50 border-rose-300' : 'bg-slate-50'}`}>
               <CardContent className="p-3 text-center">
-                <div className="flex justify-center items-center gap-1 text-teal-600 mb-1">
+                <div className={`flex justify-center items-center gap-1 mb-1 ${isSpike ? 'text-rose-600 font-bold' : 'text-teal-600'}`}>
                   <Clock className="w-3.5 h-3.5" />
                   <span className="text-[10px] font-bold uppercase">Per Jam</span>
                 </div>
-                <div className="text-base font-extrabold text-slate-800">
+                <div className={`text-base font-extrabold ${isSpike ? 'text-rose-700' : 'text-slate-800'}`}>
                   {hourlyRate.toFixed(2)}
                 </div>
                 <span className="text-[9px] text-slate-500">kWh / jam</span>
@@ -276,7 +352,7 @@ export default function AnalysisPage() {
             </CardContent>
           </Card>
 
-          {/* BARU: Rekomendasi Hemat Energi (Actionable Insights) */}
+          {/* Rekomendasi Hemat Energi Panduan Umum */}
           <Card className="border-emerald-200 bg-emerald-50/30 shadow-sm">
             <CardHeader className="pb-2 border-b border-emerald-100">
               <CardTitle className="text-sm flex items-center justify-between text-emerald-900">
@@ -292,7 +368,6 @@ export default function AnalysisPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-3 space-y-3">
-              {/* Insight 1: AC */}
               <div className="flex items-start gap-2.5 text-xs text-slate-700">
                 <div className="p-1.5 bg-teal-100 rounded-lg text-teal-700 shrink-0 mt-0.5">
                   <Thermometer className="w-4 h-4" />
@@ -305,7 +380,6 @@ export default function AnalysisPage() {
                 </div>
               </div>
 
-              {/* Insight 2: Showcase / Kulkas */}
               <div className="flex items-start gap-2.5 text-xs text-slate-700">
                 <div className="p-1.5 bg-blue-100 rounded-lg text-blue-700 shrink-0 mt-0.5">
                   <Snowflake className="w-4 h-4" />
@@ -318,7 +392,6 @@ export default function AnalysisPage() {
                 </div>
               </div>
 
-              {/* Insight 3: Operasional Malam */}
               <div className="flex items-start gap-2.5 text-xs text-slate-700">
                 <div className="p-1.5 bg-amber-100 rounded-lg text-amber-700 shrink-0 mt-0.5">
                   <ShieldCheck className="w-4 h-4" />
