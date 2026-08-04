@@ -6,6 +6,7 @@ import { Calendar, CheckCircle2, Cpu, RefreshCw, Store, Camera } from 'lucide-re
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { fetchMeterReadingsClient, Reading } from '@/lib/meterReadingsClient';
+import { computeConsumption } from '@/lib/consumption';
 
 interface Meter {
   id: string;
@@ -20,6 +21,7 @@ export default function HistoryPage() {
     typeof window !== 'undefined' ? (localStorage.getItem('active_store_id') || 'all') : 'all'
   );
   const [historyData, setHistoryData] = useState<Reading[]>([]);
+  const [anomalies, setAnomalies] = useState<Record<string, { valid: boolean; isRollover?: boolean; deltaKwh: number; deltaHours: number }>>({});
 
   useEffect(() => {
     fetchHistoryData();
@@ -37,6 +39,32 @@ export default function HistoryPage() {
           new Map(readings.map((r) => [r.meter_id, { id: r.meter_id, store_name: r.store_name ?? 'Toko', meter_number: '' }])).values()
         );
         setMeters(unique);
+      }
+
+      // Build anomaly map using computeConsumption (we need chronological scans oldest->newest)
+      if (readings && readings.length > 1) {
+        const scans = readings
+          .map((r) => ({ id: r.id, kwh: Number(r.kwh ?? 0), created_at: r.created_at }))
+          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+        const summary = computeConsumption(scans, { maxMeterValue: 99999 });
+        const map: Record<string, { valid: boolean; isRollover?: boolean; deltaKwh: number; deltaHours: number }> = {};
+
+        summary.intervals.forEach((it) => {
+          const toId = (it.to as any).id;
+          if (toId) {
+            map[String(toId)] = {
+              valid: it.valid,
+              isRollover: it.isRollover === true,
+              deltaKwh: it.deltaKwh,
+              deltaHours: it.deltaHours,
+            };
+          }
+        });
+
+        setAnomalies(map);
+      } else {
+        setAnomalies({});
       }
     } catch (err: any) {
       console.error('Gagal mengambil data riwayat:', err.message || err);
@@ -103,6 +131,8 @@ export default function HistoryPage() {
             const next = historyData[index + 1];
             const usage = next ? Math.max(0, next.kwh - item.kwh) : null; // array is DESC, so older (next) - newer (current)
 
+            const meta = anomalies[item.id as string];
+
             return (
               <Card key={item.id} className="overflow-hidden border-slate-200 shadow-sm hover:border-teal-300 transition">
                 <CardContent className="p-4 flex justify-between items-center">
@@ -127,6 +157,18 @@ export default function HistoryPage() {
                       {usage !== null && (
                         <span>
                           Pemakaian: <span className="font-semibold text-teal-700">-{usage.toFixed(1)} kWh</span>
+                        </span>
+                      )}
+
+                      {/* Anomaly / Rollover badges */}
+                      {meta && !meta.valid && (
+                        <span className="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded-md border border-red-200">
+                          Anomali ({meta.deltaKwh.toFixed(1)} kWh / {meta.deltaHours.toFixed(2)} jam)
+                        </span>
+                      )}
+                      {meta && meta.isRollover && (
+                        <span className="text-[10px] bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200">
+                          Rollover
                         </span>
                       )}
                     </div>
