@@ -5,7 +5,16 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Store, LogIn, Loader2, PlusCircle, Lock, CreditCard } from 'lucide-react';
+import {
+  Store,
+  LogIn,
+  Loader2,
+  PlusCircle,
+  Lock,
+  CreditCard,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 import Link from 'next/link';
 
 export default function LoginPage() {
@@ -14,6 +23,7 @@ export default function LoginPage() {
 
   const [identifier, setIdentifier] = useState(''); // Mengakomodasi Kode Toko atau Nomor Meter
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -25,11 +35,15 @@ export default function LoginPage() {
     try {
       const cleanInput = identifier.trim();
 
-      // 1. Cari toko berdasarkan Kode/Nama Toko ATAU Nomor Meter
+      if (!cleanInput || !password) {
+        throw new Error('Mohon isi semua kolom yang tersedia.');
+      }
+
+      // 1. Cari toko berdasarkan Kode/Nama Toko ATAU Nomor Meter (case-insensitive)
       const { data: meters, error } = await supabase
         .from('meters')
         .select('*')
-        .or(`meter_number.eq.${cleanInput},store_name.ilike.%${cleanInput}%`);
+        .or(`meter_number.ilike.%${cleanInput}%,store_name.ilike.%${cleanInput}%`);
 
       if (error || !meters || meters.length === 0) {
         throw new Error('Kode Toko atau Nomor Meter tidak ditemukan!');
@@ -45,14 +59,22 @@ export default function LoginPage() {
 
       // 3. Simpan session toko aktif & role pengguna ke LocalStorage
       localStorage.setItem('active_store_id', matchedMeter.id);
-      localStorage.setItem('active_store_name', matchedMeter.store_name || matchedMeter.name);
-      localStorage.setItem('active_meter_number', matchedMeter.meter_number);
-      
+      localStorage.setItem(
+        'active_store_name',
+        matchedMeter.store_name || matchedMeter.name || 'Toko'
+      );
+      localStorage.setItem('active_meter_number', matchedMeter.meter_number || '');
+
       // Simpan role jika ada di database, jika tidak default ke 'staff'
       if (matchedMeter.role) {
         localStorage.setItem('user_role', matchedMeter.role);
       } else {
         localStorage.setItem('user_role', 'staff');
+      }
+
+      // Dispatch Custom Event agar komponen Navigasi/Header merespons perubahan toko secara real-time
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('store_changed'));
       }
 
       // 4. Masuk ke Dashboard Utama
@@ -82,7 +104,7 @@ export default function LoginPage() {
 
         <CardContent className="space-y-4 pt-2">
           {errorMessage && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium leading-relaxed">
               {errorMessage}
             </div>
           )}
@@ -98,7 +120,7 @@ export default function LoginPage() {
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 placeholder="Contoh: VB04 atau 14028821992"
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
               />
             </div>
 
@@ -106,20 +128,33 @@ export default function LoginPage() {
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
                 <Lock className="w-3.5 h-3.5 text-slate-400" /> Kata Sandi Toko
               </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 pr-9 text-slate-800"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition"
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl flex items-center justify-center gap-2 mt-2"
+              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl flex items-center justify-center gap-2 mt-2 shadow-sm transition"
             >
               {isSubmitting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -134,7 +169,10 @@ export default function LoginPage() {
           <div className="pt-2 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-500 mb-2">Belum mendaftarkan toko?</p>
             <Link href="/toko/tambah">
-              <Button variant="outline" className="w-full text-xs border-slate-200 text-slate-700 font-medium">
+              <Button
+                variant="outline"
+                className="w-full text-xs border-slate-200 text-slate-700 font-semibold hover:bg-slate-50"
+              >
                 <PlusCircle className="w-3.5 h-3.5 mr-1.5 text-teal-600" /> Daftar Toko Baru
               </Button>
             </Link>
