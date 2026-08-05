@@ -21,14 +21,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Konversi file ke Buffer -> Base64
+    // Konversi file Blob ke Buffer -> Base64
     const arrayBuffer = await file.arrayBuffer();
     const base64Data = Buffer.from(arrayBuffer).toString('base64');
 
-    // Inisialisasi SDK Gemini
+    // Inisialisasi SDK Gemini dengan model gemini-2.5-flash
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       generationConfig: {
         responseMimeType: 'application/json',
       },
@@ -57,10 +57,11 @@ export async function POST(req: NextRequest) {
       - confidence: Estimasi tingkat kepastian pembacaan (0-100).
     `;
 
+    const mimeType = file.type || 'image/jpeg';
     const imagePart = {
       inlineData: {
         data: base64Data,
-        mimeType: file.type || 'image/jpeg',
+        mimeType: mimeType,
       },
     };
 
@@ -75,12 +76,15 @@ export async function POST(req: NextRequest) {
     }
 
     // Pembersihan Markdown Code Block jika dikembalikan oleh model
-    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const cleanJsonString = responseText
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
 
     // Parse JSON
     let parsedData: any;
     try {
-      parsedData = JSON.parse(responseText);
+      parsedData = JSON.parse(cleanJsonString);
     } catch (e) {
       console.error('Response dari model bukan JSON valid:', responseText);
       return NextResponse.json(
