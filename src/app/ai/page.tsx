@@ -13,7 +13,10 @@ import {
   BatteryCharging,
   Sparkles,
   Send,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { getTariffRate } from '@/lib/constants';
 
@@ -29,9 +32,9 @@ export default function AiPage() {
 
   const [loading, setLoading] = useState(true);
   const [meters, setMeters] = useState<Meter[]>([]);
-  const [selectedMeterId, setSelectedMeterId] = useState<string>(
-    typeof window !== 'undefined' ? localStorage.getItem('active_store_id') || 'all' : 'all'
-  );
+  const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+  const [userRole, setUserRole] = useState<string>('staff');
+  const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
 
   // Metrik Terintegrasi
   const [currentKwh, setCurrentKwh] = useState<number>(0);
@@ -58,6 +61,18 @@ export default function AiPage() {
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
 
+  // Inisialisasi state awal dari localStorage secara aman di client-side
+  useEffect(() => {
+    const storedStoreId = localStorage.getItem('active_store_id');
+    const storedRole = localStorage.getItem('user_role') || 'staff';
+
+    if (storedStoreId) {
+      setActiveStoreId(storedStoreId);
+      setSelectedMeterId(storedStoreId);
+    }
+    setUserRole(storedRole);
+  }, []);
+
   useEffect(() => {
     fetchAiInsight();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -66,12 +81,20 @@ export default function AiPage() {
   const fetchAiInsight = async () => {
     setLoading(true);
     try {
+      const currentRole = localStorage.getItem('user_role') || 'staff';
+      const currentStoreId = localStorage.getItem('active_store_id');
+
       let currentMeters = meters;
       if (currentMeters.length === 0) {
-        const { data: metersData } = await supabase
-          .from('meters')
-          .select('id, store_name, meter_number, power_va');
-        if (metersData) {
+        let query = supabase.from('meters').select('id, store_name, meter_number, power_va');
+        
+        // Filter toko untuk non-admin
+        if (currentRole !== 'admin' && currentStoreId) {
+          query = query.eq('id', currentStoreId);
+        }
+
+        const { data: metersData } = await query;
+        if (metersData && metersData.length > 0) {
           setMeters(metersData);
           currentMeters = metersData;
         }
@@ -79,8 +102,12 @@ export default function AiPage() {
 
       let targetMeterId = selectedMeterId;
       if (selectedMeterId === 'all') {
-        const { data: firstMeter } = await supabase.from('meters').select('id').limit(1).single();
-        targetMeterId = firstMeter?.id || '';
+        if (currentRole !== 'admin' && currentStoreId) {
+          targetMeterId = currentStoreId;
+        } else {
+          const { data: firstMeter } = await supabase.from('meters').select('id').limit(1).single();
+          targetMeterId = firstMeter?.id || '';
+        }
       }
 
       if (!targetMeterId) {
@@ -148,6 +175,22 @@ export default function AiPage() {
       console.error('Gagal memproses AI insight:', err?.message || err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Perbaikan fungsi Logout: Bersihkan total storage & jalankan hard refresh
+  const handleLogout = async () => {
+    try {
+      setActiveStoreId(null);
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
     }
   };
 
@@ -250,8 +293,8 @@ export default function AiPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header */}
-      <div className="flex justify-between items-center">
+      {/* Header Info & Actions */}
+      <div className="flex justify-between items-center gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <Cpu className="w-5 h-5 text-teal-600" /> AI Health & Insight
@@ -259,20 +302,45 @@ export default function AiPage() {
           <p className="text-xs text-slate-500">Rekomendasi optimasi daya real-time</p>
         </div>
 
-        {meters.length > 0 && (
-          <select
-            value={selectedMeterId}
-            onChange={(e) => setSelectedMeterId(e.target.value)}
-            className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500"
-          >
-            <option value="all">Semua Toko ({meters.length})</option>
-            {meters.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.store_name}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex items-center gap-1.5">
+          {activeStoreId ? (
+            <Button
+              onClick={handleLogout}
+              size="sm"
+              variant="outline"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Keluar
+            </Button>
+          ) : (
+            <Link href="/login">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Masuk
+              </Button>
+            </Link>
+          )}
+
+          {meters.length > 0 && (
+            <select
+              value={selectedMeterId}
+              onChange={(e) => setSelectedMeterId(e.target.value)}
+              className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm h-8"
+            >
+              {userRole === 'admin' && (
+                <option value="all">Semua Toko ({meters.length})</option>
+              )}
+              {meters.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.store_name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {loading ? (
