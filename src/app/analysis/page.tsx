@@ -70,13 +70,11 @@ export default function AnalysisPage() {
   const [storeAnalysisList, setStoreAnalysisList] = useState<StoreAnalysisItem[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('');
 
-  // Metrik berbasis jam & estimasi token per toko
   const [hourlyRate, setHourlyRate] = useState<number>(0);
   const [dailyAvgKwh, setDailyAvgKwh] = useState<number>(0);
   const [monthlyEstKwh, setMonthlyEstKwh] = useState<number>(0);
   const [monthlyEstCost, setMonthlyEstCost] = useState<number>(0);
 
-  // Status Lonjakan Jam Berjalan
   const [isSpike, setIsSpike] = useState<boolean>(false);
   const [spikePercent, setSpikePercent] = useState<number>(0);
 
@@ -139,7 +137,6 @@ export default function AnalysisPage() {
           const dailyKwh = rate * 24;
           const daysLeft = dailyKwh > 0 ? Math.floor(latestKwh / dailyKwh) : 99;
 
-          // Fetch perbandingan 3 sesi pindaian HARI INI
           const { data: todayReadings } = await supabase
             .from('meter_readings')
             .select('id, kwh, meter_value, created_at')
@@ -216,7 +213,6 @@ export default function AnalysisPage() {
     }
   };
 
-  // Kalkulasi Rata-rata Pemakaian Menggunakan Hingga 3 Pindaian Terakhir
   const calculateRateAndReadingForMeter = async (
     meterId: string
   ): Promise<{ rate: number; latestKwh: number }> => {
@@ -346,32 +342,32 @@ export default function AnalysisPage() {
   const potentialSavingsMonthly = monthlyEstCost * 0.15;
 
   return (
-    <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
       {/* Header & Control Actions */}
       <div className="flex justify-between items-start gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">Analisis Pemakaian</h1>
-          <p className="text-xs text-slate-500">Laju konsumsi jam-jaman & instruksi hemat toko</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Analisis Pemakaian</h1>
+          <p className="text-xs sm:text-sm text-slate-500">Laju konsumsi jam-jaman & instruksi hemat toko</p>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
               variant="outline"
-              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-3 h-9"
             >
-              <LogOut className="w-3.5 h-3.5" /> Keluar
+              <LogOut className="w-4 h-4" /> Keluar
             </Button>
           ) : (
             <Link href="/login">
               <Button
                 size="sm"
                 variant="outline"
-                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-3 h-9"
               >
-                <LogIn className="w-3.5 h-3.5" /> Masuk
+                <LogIn className="w-4 h-4" /> Masuk
               </Button>
             </Link>
           )}
@@ -380,9 +376,9 @@ export default function AnalysisPage() {
             <Button
               size="sm"
               onClick={handleExportCSV}
-              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold gap-1 px-2.5 h-8 shadow-sm"
+              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold gap-1 px-3 h-9 shadow-sm"
             >
-              <Download className="w-3.5 h-3.5" /> CSV
+              <Download className="w-4 h-4" /> Export CSV
             </Button>
           )}
 
@@ -390,7 +386,7 @@ export default function AnalysisPage() {
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
-              className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 h-8 outline-none"
+              className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 h-9 outline-none"
             >
               {meters.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -403,337 +399,338 @@ export default function AnalysisPage() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center items-center py-12 text-slate-400 gap-2">
-          <RefreshCw className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Menghitung analisis energi...</span>
+        <div className="flex justify-center items-center py-20 text-slate-400 gap-2">
+          <RefreshCw className="w-6 h-6 animate-spin" />
+          <span className="text-base font-medium">Menghitung analisis energi...</span>
         </div>
       ) : !isLoggedIn ? (
         <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
-          <CardContent className="p-8 text-center space-y-4">
-            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-              <Lock className="w-6 h-6" />
+          <CardContent className="p-12 text-center space-y-4">
+            <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-800 text-sm">Akses Analisis Terkunci</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+              <h3 className="font-bold text-slate-800 text-base">Akses Analisis Terkunci</h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
                 Silakan masuk menggunakan Kode Toko / ID PLN Anda untuk melihat analisis konsumsi dan proyeksi biaya energi toko Anda.
               </p>
             </div>
             <Link href="/login" className="inline-block">
-              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-6 py-2">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-8 py-2.5">
                 <LogIn className="w-4 h-4 mr-1.5" /> Masuk ke Toko
               </Button>
             </Link>
           </CardContent>
         </Card>
       ) : (
-        <>
-          {storeAnalysisList.length > 0 && (
+        /* LAYOUT DESKTOP 2 KOLOM */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* KOLOM UTAMA KIRI (2 SPAN DESKTOP) */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {storeAnalysisList.length > 0 && (
+              <Card className="border-slate-200 shadow-sm">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm flex items-center justify-between text-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-teal-700" />
+                      <span>Matriks Konsumsi Seluruh Toko</span>
+                    </div>
+                    <span className="text-xs font-normal text-slate-500">
+                      Diurutkan berdasarkan risiko token habis
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-slate-600 uppercase text-[10px]">
+                        <tr>
+                          <th className="px-3 py-2.5 rounded-l-md">Toko</th>
+                          <th className="px-3 py-2.5">Daya</th>
+                          <th className="px-3 py-2.5">Rata-Rata</th>
+                          <th className="px-3 py-2.5">Status Risiko</th>
+                          <th className="px-3 py-2.5 rounded-r-md text-right">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {storeAnalysisList.map((item) => (
+                          <tr
+                            key={item.id}
+                            className={`transition ${item.id === selectedMeterId ? 'bg-teal-50/60 font-medium' : 'hover:bg-slate-50'}`}
+                          >
+                            <td className="px-3 py-3 font-semibold text-slate-800">
+                              <div>{item.store_name}</div>
+                              <div className="text-[10px] text-slate-400 font-normal">
+                                ID: {item.meter_number || '-'}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-slate-600">{item.power_va} VA</td>
+                            <td className="px-3 py-3 font-bold text-slate-700">
+                              {item.hourlyRate.toFixed(2)}{' '}
+                              <span className="text-[9px] font-normal text-slate-500">kWh/j</span>
+                            </td>
+                            <td className="px-3 py-3">{getStatusBadge(item.daysRemaining)}</td>
+                            <td className="px-3 py-3 text-right">
+                              <Button
+                                size="sm"
+                                variant={item.id === selectedMeterId ? 'default' : 'ghost'}
+                                className={`h-8 text-xs px-2.5 ${
+                                  item.id === selectedMeterId
+                                    ? 'bg-teal-700 hover:bg-teal-800 text-white'
+                                    : 'text-teal-700 hover:text-teal-800 hover:bg-teal-50'
+                                }`}
+                                onClick={() => setSelectedMeterId(item.id)}
+                              >
+                                Detail <ArrowRight className="w-3 h-3 ml-1" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Smart Device Estimator Breakdown */}
             <Card className="border-slate-200 shadow-sm">
-              <CardHeader className="pb-2">
+              <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center justify-between text-slate-800">
                   <div className="flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-teal-700" />
-                    <span>Matriks Konsumsi Toko</span>
+                    <Activity className="w-4 h-4 text-teal-700" />
+                    <span>Beban Operasional: <strong>{selectedStoreObj?.store_name}</strong></span>
                   </div>
-                  <span className="text-[10px] font-normal text-slate-500">
-                    Urutan berdasarkan risiko token habis
-                  </span>
+                  <span className="text-xs font-normal text-slate-500">Per Hari</span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-2">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-100 text-slate-600 uppercase text-[10px]">
-                      <tr>
-                        <th className="px-3 py-2 rounded-l-md">Toko</th>
-                        <th className="px-3 py-2">Daya</th>
-                        <th className="px-3 py-2">Rata-Rata</th>
-                        <th className="px-3 py-2">Status Risiko</th>
-                        <th className="px-3 py-2 rounded-r-md text-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {storeAnalysisList.map((item) => (
-                        <tr
-                          key={item.id}
-                          className={`transition ${item.id === selectedMeterId ? 'bg-teal-50/60 font-medium' : 'hover:bg-slate-50'}`}
-                        >
-                          <td className="px-3 py-2.5 font-semibold text-slate-800">
-                            <div>{item.store_name}</div>
-                            <div className="text-[10px] text-slate-400 font-normal">
-                              ID: {item.meter_number || '-'}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2.5 text-slate-600">{item.power_va} VA</td>
-                          <td className="px-3 py-2.5 font-bold text-slate-700">
-                            {item.hourlyRate.toFixed(2)}{' '}
-                            <span className="text-[9px] font-normal text-slate-500">kWh/j</span>
-                          </td>
-                          <td className="px-3 py-2.5">{getStatusBadge(item.daysRemaining)}</td>
-                          <td className="px-3 py-2.5 text-right">
-                            <Button
-                              size="sm"
-                              variant={item.id === selectedMeterId ? 'default' : 'ghost'}
-                              className={`h-7 text-xs px-2 ${
-                                item.id === selectedMeterId
-                                  ? 'bg-teal-700 hover:bg-teal-800 text-white'
-                                  : 'text-teal-700 hover:text-teal-800 hover:bg-teal-50'
-                              }`}
-                              onClick={() => setSelectedMeterId(item.id)}
-                            >
-                              Detail <ArrowRight className="w-3 h-3 ml-1" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* TABEL PERBANDINGAN PINDAIAN SARI/SARI HARI INI */}
-          {selectedStoreObj && (
-            <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
-              <CardHeader className="pb-2 pt-3 px-4">
-                <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                  <span>📊 Breakdown Pindaian Hari Ini ({selectedStoreObj.store_name})</span>
-                  <span className="text-[10px] text-teal-700 font-normal">
-                    {selectedStoreObj.todaySessions?.length || 0}x Pindaian Sukses
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-3 space-y-2">
-                {!selectedStoreObj.todaySessions || selectedStoreObj.todaySessions.length === 0 ? (
-                  <p className="text-[11px] text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
-                ) : (
-                  selectedStoreObj.todaySessions.map((s, idx) => (
-                    <div
-                      key={s.id}
-                      className="bg-white p-2.5 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        {idx === 0 ? (
-                          <Sun className="w-4 h-4 text-amber-500" />
-                        ) : idx === 1 ? (
-                          <Sunset className="w-4 h-4 text-orange-500" />
-                        ) : (
-                          <Moon className="w-4 h-4 text-indigo-500" />
-                        )}
-                        <div>
-                          <span className="font-bold text-slate-800 block text-[11px]">{s.sessionName}</span>
-                          <span className="text-[10px] text-slate-400">Jam {s.time}</span>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
-                        {s.consumptionFromPrev !== null && (
-                          <span className="text-[10px] text-rose-600 font-bold block">
-                            Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
-                          </span>
-                        )}
-                      </div>
+              <CardContent className="space-y-4 pt-1">
+                {deviceEstimates.map((device, idx) => (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-semibold text-slate-700">
+                      <span>{device.name}</span>
+                      <span className="text-slate-900 font-bold">
+                        {device.usageKwh} kWh/hari ({device.percent}%)
+                      </span>
                     </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* BANNER PERINGATAN LONJAKAN */}
-          {isSpike ? (
-            <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl text-xs space-y-3 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-bold text-rose-800 text-sm">
-                  <TrendingUp className="w-4 h-4 text-rose-600" />
-                  <span>LONJAKAN TERDETEKSI ({selectedStoreObj?.store_name}): {hourlyRate.toFixed(2)} kWh/jam</span>
-                </div>
-                <span className="bg-rose-200 text-rose-900 font-extrabold px-2 py-0.5 rounded text-[10px]">
-                  +{spikePercent}%
-                </span>
-              </div>
-
-              <p className="text-slate-700 leading-relaxed font-medium">
-                Pemakaian di jam ini terdeteksi tinggi! Anak toko disarankan segera melakukan pengecekan berikut:
-              </p>
-
-              <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-2 text-slate-800 font-medium">
-                <div className="flex items-start gap-2">
-                  <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>AC Toko:</strong> Pastikan suhu remote dinaikkan ke <strong>23°C–24°C</strong> & pintu utama toko tertutup rapat.
-                  </span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Showcase Minuman:</strong> Cek apakah pintu kulkas/showcase renggang atau terbuka terlalu lama.
-                  </span>
-                </div>
-                <div className="flex items-start gap-2">
-                  <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
-                  <span>
-                    <strong>Penerangan:</strong> Matikan sebagian lampu sorot display/neon box luar jika siang hari cukup terang.
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl text-xs flex items-center justify-between text-emerald-800 font-medium">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Pemakaian jam berjalan {selectedStoreObj?.store_name} dalam batas normal ({hourlyRate.toFixed(2)} kWh/jam).</span>
-              </div>
-            </div>
-          )}
-
-          {/* 3 Overview Cards Spesifik Toko */}
-          <div className="grid grid-cols-3 gap-2">
-            <Card className={`border-slate-200 ${isSpike ? 'bg-rose-50/50 border-rose-300' : 'bg-slate-50'}`}>
-              <CardContent className="p-3 text-center">
-                <div className={`flex justify-center items-center gap-1 mb-1 ${isSpike ? 'text-rose-600 font-bold' : 'text-teal-600'}`}>
-                  <Clock className="w-3.5 h-3.5" />
-                  <span className="text-[10px] font-bold uppercase">Per Jam</span>
-                </div>
-                <div className={`text-base font-extrabold ${isSpike ? 'text-rose-700' : 'text-slate-800'}`}>
-                  {hourlyRate.toFixed(2)}
-                </div>
-                <span className="text-[9px] text-slate-500">kWh / jam</span>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className={`${device.color} h-full rounded-full transition-all duration-500`}
+                        style={{ width: `${device.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
 
-            <Card className="bg-slate-50 border-slate-200">
-              <CardContent className="p-3 text-center">
-                <div className="flex justify-center items-center gap-1 text-amber-600 mb-1">
-                  <Zap className="w-3.5 h-3.5" />
-                  <span className="text-[10px] font-bold uppercase">Per Hari</span>
+            {/* Rekomendasi Hemat Energi */}
+            <Card className="border-emerald-200 bg-emerald-50/30 shadow-sm">
+              <CardHeader className="pb-3 border-b border-emerald-100">
+                <CardTitle className="text-sm flex items-center justify-between text-emerald-900">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 text-amber-500 fill-amber-400" />
+                    Rekomendasi Hemat Energi
+                  </div>
+                  {potentialSavingsMonthly > 0 && (
+                    <span className="text-xs font-bold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full">
+                      Potensi Hemat: ~Rp {Math.round(potentialSavingsMonthly).toLocaleString('id-ID')}/bln
+                    </span>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                <div className="flex items-start gap-3 text-xs text-slate-700">
+                  <div className="p-2 bg-teal-100 rounded-lg text-teal-700 shrink-0 mt-0.5">
+                    <Thermometer className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-800 block text-xs">Atur Suhu AC ke Ideal (23°C - 24°C)</span>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      Menaikkan suhu AC dari 18°C ke 24°C menghemat hingga <strong>15-20% listrik AC</strong> tanpa mengurangi kenyamanan pengunjung.
+                    </p>
+                  </div>
                 </div>
-                <div className="text-base font-extrabold text-slate-800">
-                  {dailyAvgKwh.toFixed(1)}
-                </div>
-                <span className="text-[9px] text-slate-500">kWh / 24j</span>
-              </CardContent>
-            </Card>
 
-            <Card className="bg-teal-900 text-white border-none shadow-md">
-              <CardContent className="p-3 text-center">
-                <div className="flex justify-center items-center gap-1 text-teal-200 mb-1">
-                  <Wallet className="w-3.5 h-3.5" />
-                  <span className="text-[10px] font-bold uppercase">Beli Token</span>
+                <div className="flex items-start gap-3 text-xs text-slate-700">
+                  <div className="p-2 bg-blue-100 rounded-lg text-blue-700 shrink-0 mt-0.5">
+                    <Snowflake className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-800 block text-xs">Optimalkan Kondensor & Pintu Showcase</span>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      Bersihkan debu kompresor showcase sebulan sekali dan pastikan karet pintu rapat agar kompresor tidak bekerja nonstop.
+                    </p>
+                  </div>
                 </div>
-                <div className="text-base font-extrabold text-teal-100">
-                  {monthlyEstKwh.toFixed(0)} <span className="text-[10px]">kWh</span>
+
+                <div className="flex items-start gap-3 text-xs text-slate-700">
+                  <div className="p-2 bg-amber-100 rounded-lg text-amber-700 shrink-0 mt-0.5">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-800 block text-xs">Matikan Neon Box & Lampu Utama Saat Toko Tutup</span>
+                    <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                      Gunakan timer otomatis untuk mematikan lampu reklame toko pada pukul 22.00 hingga pagi hari.
+                    </p>
+                  </div>
                 </div>
-                <span className="text-[9px] text-teal-300 block font-mono">
-                  ~ Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}
-                </span>
               </CardContent>
             </Card>
           </div>
 
-          {/* Smart Device Estimator Breakdown */}
-          <Card className="border-slate-200 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center justify-between text-slate-800">
-                <div className="flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-teal-700" />
-                  <span>Beban Operasional: <strong>{selectedStoreObj?.store_name}</strong></span>
-                </div>
-                <span className="text-[10px] font-normal text-slate-500">Per Hari</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3.5 pt-2">
-              {deviceEstimates.map((device, idx) => (
-                <div key={idx} className="space-y-1">
-                  <div className="flex justify-between text-xs font-semibold text-slate-700">
-                    <span>{device.name}</span>
-                    <span className="text-slate-900 font-bold">
-                      {device.usageKwh} kWh/hari ({device.percent}%)
-                    </span>
+          {/* KOLOM KANAN / SIDEBAR (1 SPAN DESKTOP) */}
+          <div className="space-y-6">
+            
+            {/* BANNER PERINGATAN LONJAKAN */}
+            {isSpike ? (
+              <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl text-xs space-y-3 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-bold text-rose-800 text-sm">
+                    <TrendingUp className="w-4 h-4 text-rose-600" />
+                    <span>LONJAKAN TERDETEKSI ({selectedStoreObj?.store_name})</span>
                   </div>
-                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                    <div
-                      className={`${device.color} h-full rounded-full transition-all duration-500`}
-                      style={{ width: `${device.percent}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* AI Recommendation for Budget */}
-          <Card className="border-teal-200 bg-teal-50/50">
-            <CardContent className="p-4 flex items-start gap-3">
-              <Cpu className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
-              <div className="text-xs text-slate-700 space-y-1">
-                <span className="font-bold text-teal-900 block">
-                  Rencana Anggaran Listrik Bulan Depan ({selectedStoreObj?.store_name}):
-                </span>
-                <p>
-                  Berdasarkan laju <strong>{hourlyRate.toFixed(2)} kWh/jam</strong>, siapkan estimasi pembelian token sebesar <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Rekomendasi Hemat Energi */}
-          <Card className="border-emerald-200 bg-emerald-50/30 shadow-sm">
-            <CardHeader className="pb-2 border-b border-emerald-100">
-              <CardTitle className="text-sm flex items-center justify-between text-emerald-900">
-                <div className="flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-amber-500 fill-amber-400" />
-                  Rekomendasi Hemat Energi
-                </div>
-                {potentialSavingsMonthly > 0 && (
-                  <span className="text-[11px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                    Potensi Hemat: ~Rp {Math.round(potentialSavingsMonthly).toLocaleString('id-ID')}/bln
+                  <span className="bg-rose-200 text-rose-900 font-extrabold px-2 py-0.5 rounded text-[10px]">
+                    +{spikePercent}%
                   </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-3 space-y-3">
-              <div className="flex items-start gap-2.5 text-xs text-slate-700">
-                <div className="p-1.5 bg-teal-100 rounded-lg text-teal-700 shrink-0 mt-0.5">
-                  <Thermometer className="w-4 h-4" />
                 </div>
-                <div>
-                  <span className="font-bold text-slate-800 block">Atur Suhu AC ke Ideal (23°C - 24°C)</span>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Menaikkan suhu AC dari 18°C ke 24°C menghemat hingga <strong>15-20% listrik AC</strong> tanpa mengurangi kenyamanan pengunjung.
-                  </p>
-                </div>
-              </div>
 
-              <div className="flex items-start gap-2.5 text-xs text-slate-700">
-                <div className="p-1.5 bg-blue-100 rounded-lg text-blue-700 shrink-0 mt-0.5">
-                  <Snowflake className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="font-bold text-slate-800 block">Optimalkan Kondensor & Pintu Showcase</span>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Bersihkan debu kompresor showcase sebulan sekali dan pastikan karet pintu rapat agar kompresor tidak bekerja nonstop.
-                  </p>
-                </div>
-              </div>
+                <p className="text-slate-700 leading-relaxed font-medium">
+                  Pemakaian jam berjalan ({hourlyRate.toFixed(2)} kWh/jam) terdeteksi tinggi!
+                </p>
 
-              <div className="flex items-start gap-2.5 text-xs text-slate-700">
-                <div className="p-1.5 bg-amber-100 rounded-lg text-amber-700 shrink-0 mt-0.5">
-                  <ShieldCheck className="w-4 h-4" />
-                </div>
-                <div>
-                  <span className="font-bold text-slate-800 block">Matikan Neon Box & Lampu Utama Saat Toko Tutup</span>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Gunakan timer otomatis untuk mematikan lampu reklame toko pada pukul 22.00 hingga pagi hari.
-                  </p>
+                <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-2 text-slate-800 font-medium">
+                  <div className="flex items-start gap-2">
+                    <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                    <span><strong>AC Toko:</strong> Naikkan suhu remote ke <strong>23°C–24°C</strong>.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <CheckSquare className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                    <span><strong>Showcase:</strong> Cek kerapatan pintu kulkas.</span>
+                  </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </>
+            ) : (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-xs flex items-center justify-between text-emerald-800 font-medium shadow-sm">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <span>Pemakaian {selectedStoreObj?.store_name} normal ({hourlyRate.toFixed(2)} kWh/jam).</span>
+                </div>
+              </div>
+            )}
+
+            {/* TABEL PINDAIAN SESI HARI INI */}
+            {selectedStoreObj && (
+              <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-5">
+                  <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                    <span>📊 Breakdown Pindaian Hari Ini ({selectedStoreObj.store_name})</span>
+                    <span className="text-[11px] text-teal-700 font-normal">
+                      {selectedStoreObj.todaySessions?.length || 0}x Pindaian Sukses
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-5 pb-4 space-y-2.5">
+                  {!selectedStoreObj.todaySessions || selectedStoreObj.todaySessions.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
+                  ) : (
+                    selectedStoreObj.todaySessions.map((s, idx) => (
+                      <div
+                        key={s.id}
+                        className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {idx === 0 ? (
+                            <Sun className="w-4 h-4 text-amber-500" />
+                          ) : idx === 1 ? (
+                            <Sunset className="w-4 h-4 text-orange-500" />
+                          ) : (
+                            <Moon className="w-4 h-4 text-indigo-500" />
+                          )}
+                          <div>
+                            <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
+                            <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                          {s.consumptionFromPrev !== null && (
+                            <span className="text-[10px] text-rose-600 font-bold block">
+                              Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* 3 Overview Cards Spesifik Toko */}
+            <div className="grid grid-cols-3 gap-2.5">
+              <Card className={`border-slate-200 ${isSpike ? 'bg-rose-50/50 border-rose-300' : 'bg-slate-50'}`}>
+                <CardContent className="p-3 text-center">
+                  <div className={`flex justify-center items-center gap-1 mb-1 ${isSpike ? 'text-rose-600 font-bold' : 'text-teal-600'}`}>
+                    <Clock className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-bold uppercase">Per Jam</span>
+                  </div>
+                  <div className={`text-base font-extrabold ${isSpike ? 'text-rose-700' : 'text-slate-800'}`}>
+                    {hourlyRate.toFixed(2)}
+                  </div>
+                  <span className="text-[9px] text-slate-500">kWh/jam</span>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-slate-50 border-slate-200">
+                <CardContent className="p-3 text-center">
+                  <div className="flex justify-center items-center gap-1 text-amber-600 mb-1">
+                    <Zap className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-bold uppercase">Per Hari</span>
+                  </div>
+                  <div className="text-base font-extrabold text-slate-800">
+                    {dailyAvgKwh.toFixed(1)}
+                  </div>
+                  <span className="text-[9px] text-slate-500">kWh/24j</span>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-teal-900 text-white border-none shadow-md">
+                <CardContent className="p-3 text-center">
+                  <div className="flex justify-center items-center gap-1 text-teal-200 mb-1">
+                    <Wallet className="w-3.5 h-3.5" />
+                    <span className="text-[10px] font-bold uppercase">Beli Token</span>
+                  </div>
+                  <div className="text-base font-extrabold text-teal-100">
+                    {monthlyEstKwh.toFixed(0)} <span className="text-[10px]">kWh</span>
+                  </div>
+                  <span className="text-[9px] text-teal-300 block font-mono">
+                    ~ Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}
+                  </span>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* AI Recommendation for Budget */}
+            <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
+              <CardContent className="p-4 flex items-start gap-3">
+                <Cpu className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
+                <div className="text-xs text-slate-700 space-y-1">
+                  <span className="font-bold text-teal-900 block">
+                    Anggaran Listrik Bulan Depan ({selectedStoreObj?.store_name}):
+                  </span>
+                  <p className="leading-relaxed">
+                    Siapkan estimasi token <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+        </div>
       )}
     </div>
   );
