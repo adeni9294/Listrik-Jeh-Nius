@@ -21,7 +21,10 @@ import {
   AlertTriangle,
   ArrowRight,
   Download,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { getTariffRate } from '@/lib/constants';
 
@@ -48,6 +51,7 @@ export default function AnalysisPage() {
 
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('staff');
+  const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
   const [meters, setMeters] = useState<Meter[]>([]);
   const [storeAnalysisList, setStoreAnalysisList] = useState<StoreAnalysisItem[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
@@ -67,14 +71,15 @@ export default function AnalysisPage() {
 
   useEffect(() => {
     const role = localStorage.getItem('user_role') || 'staff';
-    const activeStoreId = localStorage.getItem('active_store_id');
+    const storeId = localStorage.getItem('active_store_id');
     setUserRole(role);
+    if (storeId) setActiveStoreId(storeId);
 
-    if (role !== 'admin' && activeStoreId) {
-      setSelectedMeterId(activeStoreId);
+    if (role !== 'admin' && storeId) {
+      setSelectedMeterId(storeId);
     }
 
-    fetchAnalysisData(role, activeStoreId);
+    fetchAnalysisData(role, storeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId]);
 
@@ -216,6 +221,22 @@ export default function AnalysisPage() {
     setMonthlyEstCost(calculatedMonthlyCost);
   };
 
+  // Fungsi Logout: Hapus seluruh cache & jalankan hard refresh ke /login
+  const handleLogout = async () => {
+    try {
+      setActiveStoreId(null);
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    }
+  };
+
   // FUNGSI EXPORT DATA LAPORAN KE CSV
   const handleExportCSV = () => {
     if (storeAnalysisList.length === 0) return;
@@ -296,13 +317,34 @@ export default function AnalysisPage() {
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
       {/* Header & Control Actions */}
-      <div className="flex justify-between items-start">
+      <div className="flex justify-between items-start gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Analisis Pemakaian</h1>
           <p className="text-xs text-slate-500">Laju konsumsi jam-jaman & instruksi hemat toko</p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          {activeStoreId ? (
+            <Button
+              onClick={handleLogout}
+              size="sm"
+              variant="outline"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Keluar
+            </Button>
+          ) : (
+            <Link href="/login">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Masuk
+              </Button>
+            </Link>
+          )}
+
           <Button
             size="sm"
             onClick={handleExportCSV}
@@ -315,7 +357,7 @@ export default function AnalysisPage() {
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
-              className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500"
+              className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 h-8 outline-none"
             >
               <option value="all">Semua Toko ({meters.length})</option>
               {meters.map((m) => (
