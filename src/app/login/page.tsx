@@ -14,7 +14,6 @@ import {
   CreditCard,
   Eye,
   EyeOff,
-  ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -64,7 +63,10 @@ export default function LoginPage() {
       // 3. Tentukan Peran Pengguna (Admin vs Staff)
       const userRole = matchedMeter.role || 'staff';
 
-      // 4. Simpan Session Toko Aktif & Role Pengguna ke LocalStorage
+      // 4. Bersihkan data lama & simpan Session Toko Aktif baru ke LocalStorage
+      localStorage.clear();
+      sessionStorage.clear();
+
       localStorage.setItem('active_store_id', matchedMeter.id);
       localStorage.setItem(
         'active_store_name',
@@ -73,18 +75,16 @@ export default function LoginPage() {
       localStorage.setItem('active_meter_number', matchedMeter.meter_number || '');
       localStorage.setItem('user_role', userRole);
 
-      // Dispatch Custom Event agar Header/Navigasi merespons perubahan toko secara real-time
+      // Dispatch Custom Event untuk memperbarui UI real-time jika ada listener
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('store_changed'));
       }
 
-      // 5. Masuk ke Dashboard Utama
-      router.push('/');
-      router.refresh();
+      // 5. Masuk ke Dashboard Utama dengan hard refresh agar state ter-reset total
+      window.location.href = '/';
     } catch (err: any) {
       console.error('Login error:', err);
       setErrorMessage(err.message || 'Gagal masuk. Periksa kembali data Anda.');
-    } finally {
       setIsSubmitting(false);
     }
   };
