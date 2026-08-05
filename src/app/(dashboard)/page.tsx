@@ -3,11 +3,36 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock, AlertTriangle, ShieldCheck, Lock } from 'lucide-react';
+import {
+  Zap,
+  Camera,
+  TrendingDown,
+  Cpu,
+  Store,
+  Plus,
+  RefreshCw,
+  LogIn,
+  LogOut,
+  Clock,
+  AlertTriangle,
+  ShieldCheck,
+  Lock,
+  Sun,
+  Moon,
+  Sunset,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { getTariffRate } from '@/lib/constants';
+
+interface TodayScanSession {
+  id: string;
+  time: string;
+  kwh: number;
+  consumptionFromPrev: number | null;
+  sessionName: string;
+}
 
 interface MeterWithReading {
   id: string;
@@ -22,6 +47,7 @@ interface MeterWithReading {
   lastScanIntervalHours: number;
   confidence: number;
   todayScanCount: number;  // Jumlah pindaian khusus HARI INI
+  todaySessions: TodayScanSession[]; // Array perbandingan pindaian hari ini
 }
 
 export default function DashboardPage() {
@@ -96,20 +122,50 @@ export default function DashboardPage() {
       startOfToday.setHours(0, 0, 0, 0);
 
       for (const m of meters) {
+        // Ambil data pindaian terbaru (sampai 3 pindaian terakhir untuk kestabilan)
         const { data: readings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
           .eq('meter_id', m.id)
           .order('created_at', { ascending: false })
-          .limit(2);
+          .limit(3);
 
+        // Ambil seluruh pindaian HARI INI (untuk perbandingan Sesi 1, 2, 3)
         const { data: todayReadings } = await supabase
           .from('meter_readings')
-          .select('id')
+          .select('id, kwh, meter_value, created_at')
           .eq('meter_id', m.id)
-          .gte('created_at', startOfToday.toISOString());
+          .gte('created_at', startOfToday.toISOString())
+          .order('created_at', { ascending: true }); // Diurutkan dari tertua ke terbaru hari ini
 
         const scanCountToday = todayReadings?.length || 0;
+
+        // Susun Perbandingan Sesi Hari Ini
+        const formattedSessions: TodayScanSession[] = [];
+        if (todayReadings && todayReadings.length > 0) {
+          todayReadings.forEach((r, idx) => {
+            const val = Number(r.meter_value ?? r.kwh ?? 0);
+            const timeStr = new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+            
+            let consumed: number | null = null;
+            if (idx > 0) {
+              const prevVal = Number(todayReadings[idx - 1].meter_value ?? todayReadings[idx - 1].kwh ?? 0);
+              if (prevVal >= val) {
+                consumed = prevVal - val;
+              }
+            }
+
+            const sessionLabel = idx === 0 ? 'Pindaian 1 (Pagi/Buka)' : idx === 1 ? 'Pindaian 2 (Siang)' : `Pindaian ${idx + 1} (Malam/Tutup)`;
+
+            formattedSessions.push({
+              id: r.id,
+              time: timeStr,
+              kwh: val,
+              consumptionFromPrev: consumed,
+              sessionName: sessionLabel,
+            });
+          });
+        }
 
         let lastVal: number | null = null;
         let hourlyRate = 0;
@@ -123,26 +179,15 @@ export default function DashboardPage() {
           lastVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
           avgMeterConfidence = Number(readings[0].confidence || 85);
 
-          if (readings.length === 2) {
-            const latest = {
-              kwh: Number(readings[0].meter_value ?? readings[0].kwh ?? 0),
-              time: new Date(readings[0].created_at).getTime(),
-            };
-            const previous = {
-              kwh: Number(readings[1].meter_value ?? readings[1].kwh ?? 0),
-              time: new Date(readings[1].created_at).getTime(),
-            };
-
-            const diffMs = latest.time - previous.time;
+          if (readings.length >= 2) {
+            const latest = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
+            const oldest = Number(readings[readings.length - 1].meter_value ?? readings[readings.length - 1].kwh ?? 0);
+            
+            const diffMs = new Date(readings[0].created_at).getTime() - new Date(readings[readings.length - 1].created_at).getTime();
             intervalHours = diffMs / (1000 * 60 * 60);
 
-            if (previous.kwh >= latest.kwh) {
-              const consumedKwh = previous.kwh - latest.kwh;
-              if (intervalHours >= 0.25) {
-                hourlyRate = consumedKwh / intervalHours;
-              } else if (intervalHours > 0) {
-                hourlyRate = consumedKwh;
-              }
+            if (oldest >= latest && intervalHours >= 0.25) {
+              hourlyRate = (oldest - latest) / intervalHours;
             }
 
             dailyProj = hourlyRate * 24;
@@ -166,6 +211,7 @@ export default function DashboardPage() {
           lastScanIntervalHours: intervalHours,
           confidence: avgMeterConfidence,
           todayScanCount: scanCountToday,
+          todaySessions: formattedSessions,
         });
       }
 
@@ -216,32 +262,26 @@ export default function DashboardPage() {
     }
   };
 
-  // --- LOGIKA MENGHITUNG METRIK DASHBOARD (GLOBAL vs SINGLE) ---
+  // Metrik Dashboard (Global vs Single)
   const isAllMode = selectedMeterId === 'all';
   const filteredMeters = isAllMode
     ? metersData
     : metersData.filter((m) => m.id === selectedMeterId);
 
-  // 1. Total Sisa Token (kWh)
   const displayTokenKwh = filteredMeters.reduce((acc, curr) => acc + (curr.lastReading || 0), 0);
 
-  // 2. Total Estimasi Rupiah Sisa Token
   const displayEstimatedRupiah = filteredMeters.reduce((acc, curr) => {
     const tariff = getTariffRate(curr.power_va);
     return acc + (curr.lastReading || 0) * tariff;
   }, 0);
 
-  // 3. Laju Konsumsi (kWh/jam)
   const displayHourlyRate = filteredMeters.reduce((acc, curr) => acc + curr.hourlyRate, 0);
 
-  // 4. Estimasi Hari Habis
   const totalDailyRate = displayHourlyRate * 24;
   const displayDaysLeft = totalDailyRate > 0 ? Math.max(0, Math.floor(displayTokenKwh / totalDailyRate)) : 0;
 
-  // 5. Total Scan Hari Ini
   const displayTodayScans = filteredMeters.reduce((acc, curr) => acc + curr.todayScanCount, 0);
 
-  // 6. Score Kesehatan
   const getDisplayScore = () => {
     let score = 85;
     if (displayDaysLeft <= 2) score -= 30;
@@ -255,12 +295,10 @@ export default function DashboardPage() {
 
   const getScanModeText = (count: number) => {
     if (count === 0) return { label: '0 Scan (No Data)', color: 'text-rose-300' };
-    if (isAllMode) {
-      return { label: `${count} Scan Global`, color: 'text-emerald-300' };
-    }
-    if (count === 1) return { label: '1 Scan (Basic Mode)', color: 'text-amber-300' };
-    if (count === 2) return { label: '2 Scan (Optimal Mode)', color: 'text-emerald-300' };
-    return { label: `${count} Scan (Advanced Mode)`, color: 'text-teal-200' };
+    if (isAllMode) return { label: `${count} Scan Global`, color: 'text-emerald-300' };
+    if (count === 1) return { label: '1 Scan (Basic)', color: 'text-amber-300' };
+    if (count === 2) return { label: '2 Scan (Optimal)', color: 'text-emerald-300' };
+    return { label: `${count} Scan (Advanced)`, color: 'text-teal-200' };
   };
 
   const currentScanMode = getScanModeText(displayTodayScans);
@@ -378,7 +416,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Ringkasan Angka (Akumulasi / Spesifik) */}
+          {/* Quick Stats Grid */}
           <div className="grid grid-cols-2 gap-3">
             <Card className="bg-slate-50 border-slate-200">
               <CardContent className="p-4">
@@ -411,7 +449,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Selector Toko (Sesuai Role) */}
+          {/* Selector Toko */}
           {metersData.length > 0 && (
             <div className="flex items-center justify-between pt-1">
               <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
@@ -509,6 +547,55 @@ export default function DashboardPage() {
               })}
             </div>
           )}
+
+          {/* PERBANDINGAN PINDAIAN 1, 2, 3 HARI INI */}
+          {filteredMeters.map((m) => (
+            <Card key={`sessions-${m.id}`} className="border-teal-200 bg-teal-50/30">
+              <CardHeader className="pb-2 pt-3 px-4">
+                <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                  <span>📊 Breakdown Pindaian Hari Ini ({m.store_name})</span>
+                  <span className="text-[10px] text-teal-700 font-normal">
+                    {m.todaySessions.length}x Pindaian
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-3 space-y-2">
+                {m.todaySessions.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">Belum ada pindaian hari ini.</p>
+                ) : (
+                  m.todaySessions.map((s, idx) => (
+                    <div
+                      key={s.id}
+                      className="bg-white p-2.5 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        {idx === 0 ? (
+                          <Sun className="w-4 h-4 text-amber-500" />
+                        ) : idx === 1 ? (
+                          <Sunset className="w-4 h-4 text-orange-500" />
+                        ) : (
+                          <Moon className="w-4 h-4 text-indigo-500" />
+                        )}
+                        <div>
+                          <span className="font-bold text-slate-800 block text-[11px]">{s.sessionName}</span>
+                          <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                        {s.consumptionFromPrev !== null && (
+                          <span className="text-[10px] text-rose-600 font-bold block">
+                            Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          ))}
 
           {/* AI Energy Insight */}
           <Card className="border-teal-200 bg-teal-50/50">
