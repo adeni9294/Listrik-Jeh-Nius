@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import {
   RefreshCw,
   Calendar,
@@ -11,8 +12,10 @@ import {
   X,
   Eye,
   TrendingDown,
-  ArrowRight,
+  LogOut,
+  LogIn,
 } from 'lucide-react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
 interface TableReading {
@@ -30,6 +33,8 @@ export default function HistoryPage() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState<string>('staff');
+  const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
   const [readings, setReadings] = useState<TableReading[]>([]);
   const [metersMap, setMetersMap] = useState<
     Record<string, { store_name: string; meter_number: string }>
@@ -44,6 +49,17 @@ export default function HistoryPage() {
   } | null>(null);
 
   useEffect(() => {
+    const role = localStorage.getItem('user_role') || 'staff';
+    const storeId = localStorage.getItem('active_store_id');
+    setUserRole(role);
+    if (storeId) setActiveStoreId(storeId);
+
+    if (role !== 'admin' && storeId) {
+      setSelectedMeterId(storeId);
+    }
+  }, []);
+
+  useEffect(() => {
     initHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId]);
@@ -51,10 +67,19 @@ export default function HistoryPage() {
   const initHistory = async () => {
     setLoading(true);
     try {
-      // 1. Ambil data Toko untuk Map ID -> Store Name
-      const { data: metersData } = await supabase
+      const currentRole = localStorage.getItem('user_role') || 'staff';
+      const currentActiveStore = localStorage.getItem('active_store_id');
+
+      // 1. Ambil data Toko dengan filter RBAC
+      let meterQuery = supabase
         .from('meters')
         .select('id, store_name, meter_number');
+
+      if (currentRole !== 'admin' && currentActiveStore) {
+        meterQuery = meterQuery.eq('id', currentActiveStore);
+      }
+
+      const { data: metersData } = await meterQuery;
 
       const map: Record<string, { store_name: string; meter_number: string }> = {};
       if (metersData) {
@@ -72,18 +97,23 @@ export default function HistoryPage() {
 
       if (selectedMeterId !== 'all') {
         query = query.eq('meter_id', selectedMeterId);
+      } else if (currentRole !== 'admin' && currentActiveStore) {
+        query = query.eq('meter_id', currentActiveStore);
       }
 
       let { data: readingsData, error } = await query.order('created_at', {
         ascending: false,
       });
 
-      // Fallback jika nama tabelnya di DB adalah 'readings'
+      // Fallback jika nama tabel di DB adalah 'readings'
       if (error || !readingsData) {
-        const fallbackRes = await supabase
-          .from('readings')
-          .select('*')
-          .order('created_at', { ascending: false });
+        let fallbackQuery = supabase.from('readings').select('*');
+        if (selectedMeterId !== 'all') {
+          fallbackQuery = fallbackQuery.eq('meter_id', selectedMeterId);
+        } else if (currentRole !== 'admin' && currentActiveStore) {
+          fallbackQuery = fallbackQuery.eq('meter_id', currentActiveStore);
+        }
+        const fallbackRes = await fallbackQuery.order('created_at', { ascending: false });
         readingsData = fallbackRes.data || [];
       }
 
@@ -95,7 +125,7 @@ export default function HistoryPage() {
           };
           const currentKwh = Number(item.meter_value ?? item.kwh ?? item.value ?? 0);
 
-          // Hitung konsumsi energi berdasarkan data pindaian sebelumnya (jika ada pada toko yang sama)
+          // Hitung konsumsi energi berdasarkan data pindaian sebelumnya
           let consumption: number | null = null;
           const prevReading = readingsData.slice(index + 1).find((r: any) => r.meter_id === item.meter_id);
           if (prevReading) {
@@ -126,6 +156,21 @@ export default function HistoryPage() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      setActiveStoreId(null);
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    }
+  };
+
   const formatDate = (isoString: string) => {
     if (!isoString) return '-';
     const date = new Date(isoString);
@@ -152,27 +197,50 @@ export default function HistoryPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      {/* Header & Filter */}
-      <div className="flex justify-between items-center">
+      {/* Header & Control Actions */}
+      <div className="flex justify-between items-center gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Riwayat Pembacaan</h1>
           <p className="text-xs text-slate-500">Log pindaian & bukti foto meteran</p>
         </div>
 
-        {meterOptions.length > 0 && (
-          <select
-            value={selectedMeterId}
-            onChange={(e) => setSelectedMeterId(e.target.value)}
-            className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 outline-none"
-          >
-            <option value="all">Semua Toko ({meterOptions.length})</option>
-            {meterOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.store_name}
-              </option>
-            ))}
-          </select>
-        )}
+        <div className="flex items-center gap-1.5">
+          {activeStoreId ? (
+            <Button
+              onClick={handleLogout}
+              size="sm"
+              variant="outline"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Keluar
+            </Button>
+          ) : (
+            <Link href="/login">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Masuk
+              </Button>
+            </Link>
+          )}
+
+          {meterOptions.length > 0 && userRole === 'admin' && (
+            <select
+              value={selectedMeterId}
+              onChange={(e) => setSelectedMeterId(e.target.value)}
+              className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 outline-none h-8"
+            >
+              <option value="all">Semua Toko ({meterOptions.length})</option>
+              {meterOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.store_name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {loading ? (
