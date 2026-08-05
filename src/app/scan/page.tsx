@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Camera, RefreshCw, Edit3, Check, Store, Image as ImageIcon } from 'lucide-react';
+import { Camera, RefreshCw, Edit3, Check, Store, Image as ImageIcon, LogOut, LogIn } from 'lucide-react';
+import Link from 'next/link';
 import { processAndCompressImage } from '@/lib/utils/image-compressor';
 import { AIValidationEngine, ValidationResult } from '@/lib/ai/validation-engine';
 import { createClient } from '@/lib/supabase/client';
@@ -25,10 +26,11 @@ export default function ScanPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
-  // State untuk Toko / Meteran
+  // State untuk Toko / Meteran & Auth
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('');
   const [isLoadingMeters, setIsLoadingMeters] = useState<boolean>(true);
+  const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
 
   // State untuk Edit Manual
   const [isEditing, setIsEditing] = useState(false);
@@ -38,18 +40,27 @@ export default function ScanPage() {
   useEffect(() => {
     const fetchMeters = async () => {
       try {
-        const { data, error } = await supabase
+        const storedRole = localStorage.getItem('user_role') || 'staff';
+        const storedStoreId = localStorage.getItem('active_store_id');
+        if (storedStoreId) setActiveStoreId(storedStoreId);
+
+        let query = supabase
           .from('meters')
           .select('id, store_name, meter_number')
           .order('created_at', { ascending: false });
+
+        if (storedRole !== 'admin' && storedStoreId) {
+          query = query.eq('id', storedStoreId);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 
         if (data && data.length > 0) {
           setMeters(data);
-          const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
-          const activeExists = activeStoreId && data.some((m) => m.id === activeStoreId);
-          setSelectedMeterId(activeExists ? activeStoreId! : data[0].id); // Prioritaskan toko yang sedang login
+          const activeExists = storedStoreId && data.some((m) => m.id === storedStoreId);
+          setSelectedMeterId(activeExists ? storedStoreId! : data[0].id);
         }
       } catch (err: any) {
         console.error('Gagal mengambil data toko:', err.message);
@@ -60,6 +71,21 @@ export default function ScanPage() {
 
     fetchMeters();
   }, [supabase]);
+
+  const handleLogout = async () => {
+    try {
+      setActiveStoreId(null);
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    }
+  };
 
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,7 +105,7 @@ export default function ScanPage() {
       let lastReadingValue = 0;
       if (selectedMeterId) {
         try {
-          const readings = await fetchMeterReadingsClient(selectedMeterId, 1); // latest first
+          const readings = await fetchMeterReadingsClient(selectedMeterId, 1);
           if (readings && readings.length > 0) {
             lastReadingValue = Number(readings[0].kwh ?? 0);
           }
@@ -127,7 +153,6 @@ export default function ScanPage() {
     try {
       const fileName = `${meterId}/${Date.now()}.jpg`;
 
-      // Mencoba upload ke bucket 'meter-images'
       const { data, error } = await supabase.storage
         .from('meter-images')
         .upload(fileName, blob, { contentType: 'image/jpeg' });
@@ -165,12 +190,12 @@ export default function ScanPage() {
 
     setIsSaving(true);
     try {
-      const activeStoreId = typeof window !== 'undefined' ? localStorage.getItem('active_store_id') : null;
-      const meterId = selectedMeterId || activeStoreId;
+      const currentActiveStore = localStorage.getItem('active_store_id');
+      const meterId = selectedMeterId || currentActiveStore;
 
       if (!meterId) {
         alert('Silakan masuk dahulu agar data tersimpan dan dapat tampil di dashboard.');
-        router.push('/login');
+        window.location.href = '/login';
         return;
       }
 
@@ -204,8 +229,7 @@ export default function ScanPage() {
       if (insertError) throw insertError;
 
       alert(`Tersimpan: ${insertedRow.kwh} kWh`);
-      router.replace('/');
-      router.refresh();
+      window.location.href = '/';
     } catch (err: any) {
       console.error('Gagal menyimpan ke Supabase:', err);
       alert(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
@@ -216,9 +240,35 @@ export default function ScanPage() {
 
   return (
     <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Pindai Meter Listrik</h1>
-        <p className="text-xs text-slate-500">Ambil foto layar angka meteran PLN toko Anda dengan jelas.</p>
+      {/* Header Info & Actions */}
+      <div className="flex justify-between items-center gap-2">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">Pindai Meter Listrik</h1>
+          <p className="text-xs text-slate-500">Ambil foto layar angka meteran PLN toko Anda dengan jelas.</p>
+        </div>
+
+        <div>
+          {activeStoreId ? (
+            <Button
+              onClick={handleLogout}
+              size="sm"
+              variant="outline"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Keluar
+            </Button>
+          ) : (
+            <Link href="/login">
+              <Button
+                size="sm"
+                variant="outline"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Masuk
+              </Button>
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Selector Toko / Meteran */}
