@@ -35,6 +35,7 @@ export default function AiPage() {
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
   const [userRole, setUserRole] = useState<string>('staff');
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
   // Metrik Terintegrasi
   const [currentKwh, setCurrentKwh] = useState<number>(0);
@@ -64,13 +65,20 @@ export default function AiPage() {
   // Inisialisasi state awal dari localStorage secara aman di client-side
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
-    const storedRole = localStorage.getItem('user_role') || 'staff';
+    const storedRole = localStorage.getItem('user_role');
 
-    if (storedStoreId) {
+    if (storedStoreId && storedRole) {
+      setIsLoggedIn(true);
       setActiveStoreId(storedStoreId);
-      setSelectedMeterId(storedStoreId);
+      setUserRole(storedRole);
+      if (storedRole !== 'admin') {
+        setSelectedMeterId(storedStoreId);
+      }
+    } else {
+      setIsLoggedIn(false);
+      setActiveStoreId(null);
+      setUserRole('staff');
     }
-    setUserRole(storedRole);
   }, []);
 
   useEffect(() => {
@@ -181,6 +189,7 @@ export default function AiPage() {
   // Perbaikan fungsi Logout: Bersihkan total storage & jalankan hard refresh
   const handleLogout = async () => {
     try {
+      setIsLoggedIn(false);
       setActiveStoreId(null);
       await supabase.auth.signOut();
       localStorage.clear();
@@ -303,7 +312,7 @@ export default function AiPage() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          {activeStoreId ? (
+          {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
@@ -324,15 +333,13 @@ export default function AiPage() {
             </Link>
           )}
 
-          {meters.length > 0 && (
+          {meters.length > 0 && userRole === 'admin' && (
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
               className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm h-8"
             >
-              {userRole === 'admin' && (
-                <option value="all">Semua Toko ({meters.length})</option>
-              )}
+              <option value="all">Semua Toko ({meters.length})</option>
               {meters.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.store_name}
