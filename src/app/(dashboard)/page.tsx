@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Zap, Camera, TrendingDown, Cpu, Store, Plus, RefreshCw, LogIn, LogOut, Clock, AlertTriangle, ShieldCheck, Lock } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -47,17 +47,19 @@ export default function DashboardPage() {
     const storedStoreId = localStorage.getItem('active_store_id');
     const storedRole = localStorage.getItem('user_role');
 
+    // VALIDASI SESI LOGGED IN
     if (storedStoreId && storedRole) {
       setIsLoggedIn(true);
       setActiveStoreId(storedStoreId);
       setUserRole(storedRole);
+      fetchDashboardData(storedRole, storedStoreId);
     } else {
       setIsLoggedIn(false);
       setActiveStoreId(null);
       setUserRole('staff');
+      setMetersData([]);
+      setLoading(false);
     }
-
-    fetchDashboardData(storedRole || 'staff', storedStoreId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -66,6 +68,13 @@ export default function DashboardPage() {
     try {
       const currentRole = roleParam ?? (localStorage.getItem('user_role') || 'staff');
       const currentStoreId = storeIdParam ?? localStorage.getItem('active_store_id');
+
+      // GUARD KEAMANAN: Hentikan fetch jika tidak ada sesi login toko
+      if (!currentStoreId && currentRole !== 'admin') {
+        setMetersData([]);
+        setLoading(false);
+        return;
+      }
 
       // 1. Ambil daftar toko dengan filter RBAC
       let query = supabase
@@ -222,6 +231,8 @@ export default function DashboardPage() {
 
   // Realtime subscription
   useEffect(() => {
+    if (!isLoggedIn) return;
+
     const channel = supabase
       .channel('public:meter_readings')
       .on(
@@ -238,9 +249,8 @@ export default function DashboardPage() {
         console.warn('Error unsubscribing channel', err);
       }
     };
-  }, [supabase]);
+  }, [supabase, isLoggedIn]);
 
-  // Perbaikan fungsi Logout: Hapus seluruh cache & reload total halaman
   const handleLogout = async () => {
     try {
       setActiveStoreId(null);
@@ -308,14 +318,14 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-1.5">
             Halo, Pengelola Toko 👋
-            {userRole === 'admin' && (
+            {isLoggedIn && userRole === 'admin' && (
               <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-300 flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3" /> Admin
               </span>
             )}
           </h1>
           <p className="text-xs text-slate-500">
-            Monitoring: <span className="font-semibold text-teal-700">{metersData.length} Toko Terdaftar</span>
+            Monitoring: <span className="font-semibold text-teal-700">{isLoggedIn ? `${metersData.length} Toko Terdaftar` : 'Silakan Masuk'}</span>
           </p>
         </div>
 
@@ -341,11 +351,13 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          <Link href="/toko/tambah">
-            <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold gap-1 px-2.5 h-8">
-              <Plus className="w-3.5 h-3.5" /> Toko
-            </Button>
-          </Link>
+          {isLoggedIn && (
+            <Link href="/toko/tambah">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold gap-1 px-2.5 h-8">
+                <Plus className="w-3.5 h-3.5" /> Toko
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -354,7 +366,28 @@ export default function DashboardPage() {
           <RefreshCw className="w-5 h-5 animate-spin" />
           <span className="text-sm">Memuat analisis energi toko...</span>
         </div>
+      ) : !isLoggedIn ? (
+        /* TAMPILAN TERKUNCI JIKA LOGOUT */
+        <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Akses Dashboard Terkunci</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                Silakan masuk menggunakan Kode Toko / ID PLN Anda untuk melihat ringkasan konsumsi listrik toko Anda.
+              </p>
+            </div>
+            <Link href="/login" className="inline-block">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-6 py-2">
+                <LogIn className="w-4 h-4 mr-1.5" /> Masuk ke Toko
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
       ) : (
+        /* TAMPILAN DATA JIKA LOGGED IN */
         <>
           {/* Energy Intelligence Score Card */}
           <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
