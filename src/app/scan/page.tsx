@@ -26,23 +26,31 @@ export default function ScanPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
-  // State untuk Toko / Meteran & Auth
+  // State Auth & Data Toko
   const [meters, setMeters] = useState<Meter[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('');
   const [isLoadingMeters, setIsLoadingMeters] = useState<boolean>(true);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false); // STATE LOGIN
 
   // State untuk Edit Manual
   const [isEditing, setIsEditing] = useState(false);
   const [manualValue, setManualValue] = useState<string>('');
 
-  // 1. Ambil Daftar Toko Milik User Saat Halaman Dimuat
   useEffect(() => {
     const fetchMeters = async () => {
       try {
-        const storedRole = localStorage.getItem('user_role') || 'staff';
+        const storedRole = localStorage.getItem('user_role');
         const storedStoreId = localStorage.getItem('active_store_id');
-        if (storedStoreId) setActiveStoreId(storedStoreId);
+        
+        // VALIDASI SESI LOGIN
+        if (storedStoreId && storedRole) {
+          setIsLoggedIn(true);
+          setActiveStoreId(storedStoreId);
+        } else {
+          setIsLoggedIn(false);
+          setActiveStoreId(null);
+        }
 
         let query = supabase
           .from('meters')
@@ -74,6 +82,7 @@ export default function ScanPage() {
 
   const handleLogout = async () => {
     try {
+      setIsLoggedIn(false);
       setActiveStoreId(null);
       await supabase.auth.signOut();
       localStorage.clear();
@@ -96,12 +105,10 @@ export default function ScanPage() {
     setIsEditing(false);
 
     try {
-      // 1. Resize & Compress Gambar
       const compressedBlob = await processAndCompressImage(file);
       setCompressedFileBlob(compressedBlob);
       setPreviewUrl(URL.createObjectURL(compressedBlob));
 
-      // 2. Ambil Bacaan Terakhir Asli dari Toko yang Dipilih
       let lastReadingValue = 0;
       if (selectedMeterId) {
         try {
@@ -115,7 +122,6 @@ export default function ScanPage() {
         }
       }
 
-      // 3. Jalankan OCR via Gemini API Route
       const formData = new FormData();
       formData.append('image', compressedBlob);
 
@@ -131,7 +137,6 @@ export default function ScanPage() {
 
       const ocrData = await res.json();
 
-      // 4. Jalankan AI Validation Engine
       const validated = AIValidationEngine.validate(
         ocrData.rawText,
         ocrData.confidence,
@@ -148,7 +153,6 @@ export default function ScanPage() {
     }
   };
 
-  // Upload gambar ke Supabase Storage & dapatkan Public URL
   const uploadImageToStorage = async (blob: Blob, meterId: string): Promise<string | null> => {
     try {
       const fileName = `${meterId}/${Date.now()}.jpg`;
@@ -173,7 +177,6 @@ export default function ScanPage() {
     }
   };
 
-  // Simpan Data ke Supabase
   const handleSave = async () => {
     if (!validationResult) return;
 
@@ -199,7 +202,6 @@ export default function ScanPage() {
         return;
       }
 
-      // Upload gambar terlebih dahulu jika ada
       let uploadedImageUrl: string | null = null;
       if (compressedFileBlob) {
         uploadedImageUrl = await uploadImageToStorage(compressedFileBlob, meterId);
@@ -219,7 +221,6 @@ export default function ScanPage() {
         created_at: now.toISOString(),
       };
 
-      // Insert dan ambil inserted row
       const { data: insertedRow, error: insertError } = await supabase
         .from('meter_readings')
         .insert([payload])
@@ -248,7 +249,8 @@ export default function ScanPage() {
         </div>
 
         <div>
-          {activeStoreId ? (
+          {/* PENKONDISIAN BERDASARKAN isLoggedIn */}
+          {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
