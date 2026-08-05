@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>('staff');
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
@@ -44,12 +45,19 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
-    const storedRole = localStorage.getItem('user_role') || 'staff';
-    
-    if (storedStoreId) setActiveStoreId(storedStoreId);
-    setUserRole(storedRole);
+    const storedRole = localStorage.getItem('user_role');
 
-    fetchDashboardData(storedRole, storedStoreId);
+    if (storedStoreId && storedRole) {
+      setIsLoggedIn(true);
+      setActiveStoreId(storedStoreId);
+      setUserRole(storedRole);
+    } else {
+      setIsLoggedIn(false);
+      setActiveStoreId(null);
+      setUserRole('staff');
+    }
+
+    fetchDashboardData(storedRole || 'staff', storedStoreId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -76,20 +84,12 @@ export default function DashboardPage() {
       if (!meters || meters.length === 0) {
         setMetersData([]);
         setLoading(false);
-        setTimeout(() => router.push('/toko/tambah'), 500);
         return;
       }
 
       // Jika role staff, paksa selector toko ke tokonya saja (bukan 'all')
-      if (currentRole !== 'admin') {
+      if (currentRole !== 'admin' && meters[0]) {
         setSelectedMeterId(meters[0].id);
-      }
-
-      if (!currentStoreId) {
-        const first = meters[0];
-        localStorage.setItem('active_store_id', first.id);
-        localStorage.setItem('active_store_name', first.store_name || 'Toko');
-        setActiveStoreId(first.id);
       }
 
       let accumLastReadings = 0;
@@ -244,6 +244,7 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     try {
       setActiveStoreId(null);
+      setIsLoggedIn(false);
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear();
@@ -319,7 +320,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          {activeStoreId ? (
+          {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
