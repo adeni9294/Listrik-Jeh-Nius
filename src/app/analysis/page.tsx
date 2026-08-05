@@ -50,6 +50,7 @@ export default function AnalysisPage() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [userRole, setUserRole] = useState<string>('staff');
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
   const [meters, setMeters] = useState<Meter[]>([]);
@@ -70,20 +71,27 @@ export default function AnalysisPage() {
   const NORMAL_HOURLY_THRESHOLD = 10.0; // Ambang batas normal (10 kWh/jam)
 
   useEffect(() => {
-    const role = localStorage.getItem('user_role') || 'staff';
+    const role = localStorage.getItem('user_role');
     const storeId = localStorage.getItem('active_store_id');
-    setUserRole(role);
-    if (storeId) setActiveStoreId(storeId);
 
-    if (role !== 'admin' && storeId) {
-      setSelectedMeterId(storeId);
+    if (storeId && role) {
+      setIsLoggedIn(true);
+      setUserRole(role);
+      setActiveStoreId(storeId);
+      if (role !== 'admin') {
+        setSelectedMeterId(storeId);
+      }
+    } else {
+      setIsLoggedIn(false);
+      setUserRole('staff');
+      setActiveStoreId(null);
     }
 
     fetchAnalysisData(role, storeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId]);
 
-  const fetchAnalysisData = async (roleParam?: string, activeStoreIdParam?: string | null) => {
+  const fetchAnalysisData = async (roleParam?: string | null, activeStoreIdParam?: string | null) => {
     setLoading(true);
     try {
       const currentRole = roleParam ?? (localStorage.getItem('user_role') || 'staff');
@@ -224,6 +232,7 @@ export default function AnalysisPage() {
   // Fungsi Logout: Hapus seluruh cache & jalankan hard refresh ke /login
   const handleLogout = async () => {
     try {
+      setIsLoggedIn(false);
       setActiveStoreId(null);
       await supabase.auth.signOut();
       localStorage.clear();
@@ -324,7 +333,7 @@ export default function AnalysisPage() {
         </div>
 
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
-          {activeStoreId ? (
+          {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
