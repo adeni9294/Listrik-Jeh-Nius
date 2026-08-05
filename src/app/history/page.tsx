@@ -14,6 +14,7 @@ import {
   TrendingDown,
   LogOut,
   LogIn,
+  Lock,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -35,7 +36,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('staff');
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false); // STATE LOGIN
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [readings, setReadings] = useState<TableReading[]>([]);
   const [metersMap, setMetersMap] = useState<
     Record<string, { store_name: string; meter_number: string }>
@@ -52,7 +53,7 @@ export default function HistoryPage() {
   useEffect(() => {
     const role = localStorage.getItem('user_role');
     const storeId = localStorage.getItem('active_store_id');
-    
+
     // VALIDASI SESI LOGIN
     if (storeId && role) {
       setIsLoggedIn(true);
@@ -61,23 +62,36 @@ export default function HistoryPage() {
       if (role !== 'admin') {
         setSelectedMeterId(storeId);
       }
+      initHistory(role, storeId);
     } else {
       setIsLoggedIn(false);
       setActiveStoreId(null);
       setUserRole('staff');
+      setReadings([]);
+      setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    initHistory();
+    if (isLoggedIn) {
+      initHistory();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId]);
 
-  const initHistory = async () => {
+  const initHistory = async (roleParam?: string | null, activeStoreIdParam?: string | null) => {
     setLoading(true);
     try {
-      const currentRole = localStorage.getItem('user_role');
-      const currentActiveStore = localStorage.getItem('active_store_id');
+      const currentRole = roleParam ?? localStorage.getItem('user_role');
+      const currentActiveStore = activeStoreIdParam ?? localStorage.getItem('active_store_id');
+
+      // GUARD KEAMANAN: Hentikan fetch jika tidak ada session login toko
+      if (!currentActiveStore && currentRole !== 'admin') {
+        setReadings([]);
+        setLoading(false);
+        return;
+      }
 
       // 1. Ambil data Toko dengan filter RBAC
       let meterQuery = supabase
@@ -214,7 +228,6 @@ export default function HistoryPage() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          {/* PENKONDISIAN BERDASARKAN isLoggedIn */}
           {isLoggedIn ? (
             <Button
               onClick={handleLogout}
@@ -236,7 +249,7 @@ export default function HistoryPage() {
             </Link>
           )}
 
-          {meterOptions.length > 0 && userRole === 'admin' && (
+          {isLoggedIn && meterOptions.length > 0 && userRole === 'admin' && (
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
@@ -258,7 +271,28 @@ export default function HistoryPage() {
           <RefreshCw className="w-5 h-5 animate-spin" />
           <span className="text-sm font-medium">Memuat tabel riwayat...</span>
         </div>
+      ) : !isLoggedIn ? (
+        /* TAMPILAN TERKUNCI JIKA LOGOUT */
+        <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Riwayat Terkunci</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                Silakan masuk menggunakan Kode Toko / ID PLN Anda untuk melihat log riwayat pindaian dan bukti foto meteran.
+              </p>
+            </div>
+            <Link href="/login" className="inline-block">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-6 py-2">
+                <LogIn className="w-4 h-4 mr-1.5" /> Masuk ke Toko
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
       ) : (
+        /* TAMPILAN TABEL TERSEDIA JIKA LOGGED IN */
         <Card className="border-slate-200 shadow-sm overflow-hidden">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
