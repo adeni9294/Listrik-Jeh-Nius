@@ -40,20 +40,44 @@
   * {
     @apply border-border;
   }
+
+  html,
+  body {
+    min-height: 100vh;
+    scroll-behavior: smooth;
+  }
+
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     -webkit-tap-highlight-color: transparent;
-    user-select: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Mengizinkan seleksi teks pada input & area bacaan */
+  input,
+  textarea,
+  [contenteditable="true"] {
+    user-select: text !important;
   }
 }
 
-/* Custom Utilities & Animations */
+/* Custom Utilities & Responsive FX */
 @layer utilities {
   .glass-effect {
     background: rgba(255, 255, 255, 0.85);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+  }
+
+  /* Menghilangkan scrollbar tapi fungsi scroll tetap berjalan */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
