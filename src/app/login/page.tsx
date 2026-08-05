@@ -34,7 +34,7 @@ export default function LoginPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // PIN MASTER ADMIN (Ubah sesuai kebutuhan Anda)
-  const MASTER_ADMIN_PIN = '123456';
+  const MASTER_ADMIN_PIN = '456456';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,7 +238,7 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={loginMode === 'admin' ? 'Default PIN: 123456' : '••••••••'}
+                  placeholder={loginMode === 'admin' ? 'Masukkan Pin Admin' : '••••••••'}
                   className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 pr-9 text-slate-800 font-mono font-bold"
                 />
                 <button
