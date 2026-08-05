@@ -33,7 +33,7 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // PIN MASTER ADMIN (Ubah sesuai kebutuhan Anda)
+  // PIN MASTER ADMIN RAHASIA
   const MASTER_ADMIN_PIN = '456456';
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -130,7 +130,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="p-4 space-y-4 pt-10 max-w-sm mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-4 pt-10 sm:pt-16 max-w-md mx-auto">
       <Card className="border-slate-200 shadow-sm overflow-hidden">
         {/* TAB NAVIGATION LOGIN MODE */}
         <div className="grid grid-cols-2 bg-slate-100 p-1 border-b border-slate-200">
@@ -140,7 +140,7 @@ export default function LoginPage() {
               setLoginMode('admin');
               setErrorMessage(null);
             }}
-            className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
+            className={`py-2.5 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
               loginMode === 'admin'
                 ? 'bg-white text-amber-800 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-slate-800'
@@ -155,7 +155,7 @@ export default function LoginPage() {
               setLoginMode('staff');
               setErrorMessage(null);
             }}
-            className={`py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
+            className={`py-2.5 text-xs sm:text-sm font-bold rounded-lg flex items-center justify-center gap-1.5 transition ${
               loginMode === 'staff'
                 ? 'bg-white text-teal-800 shadow-sm border border-slate-200'
                 : 'text-slate-500 hover:text-slate-800'
@@ -165,38 +165,38 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <CardHeader className="text-center pb-2 pt-4">
+        <CardHeader className="text-center pb-2 pt-6">
           <div
-            className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2 ${
+            className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-2 ${
               loginMode === 'admin'
                 ? 'bg-amber-50 text-amber-700'
                 : 'bg-teal-50 text-teal-700'
             }`}
           >
             {loginMode === 'admin' ? (
-              <ShieldCheck className="w-6 h-6" />
+              <ShieldCheck className="w-7 h-7" />
             ) : (
-              <Store className="w-6 h-6" />
+              <Store className="w-7 h-7" />
             )}
           </div>
-          <CardTitle className="text-lg font-bold text-slate-800">
+          <CardTitle className="text-xl font-bold text-slate-800">
             {loginMode === 'admin' ? 'Masuk Sesi Admin' : 'Masuk Listrik Jenius'}
           </CardTitle>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs sm:text-sm text-slate-500">
             {loginMode === 'admin'
               ? 'Masukkan PIN Master Admin untuk akses semua toko'
               : 'Gunakan Kode Toko / ID Pelanggan PLN & Kata Sandi'}
           </p>
         </CardHeader>
 
-        <CardContent className="space-y-4 pt-2">
+        <CardContent className="space-y-4 pt-2 p-6">
           {errorMessage && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg font-medium leading-relaxed">
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs sm:text-sm rounded-xl font-medium leading-relaxed">
               {errorMessage}
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-3">
+          <form onSubmit={handleLogin} className="space-y-4">
             {loginMode === 'staff' ? (
               /* FORM KHUSUS STAFF */
               <div>
@@ -209,12 +209,12 @@ export default function LoginPage() {
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   placeholder="Contoh: VB04 atau 14028821992"
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
+                  className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-500 font-medium text-slate-800"
                 />
               </div>
             ) : (
               /* INFO KHUSUS ADMIN */
-              <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-amber-900 text-[11px] leading-relaxed">
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-900 text-xs leading-relaxed">
                 🔑 <strong>Akses Admin:</strong> Memberikan kontrol global ke seluruh toko, ekspor CSV, dan pemantauan perbandingan pindaian.
               </div>
             )}
@@ -238,13 +238,13 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder={loginMode === 'admin' ? 'Masukkan Pin Admin' : '••••••••'}
-                  className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 pr-9 text-slate-800 font-mono font-bold"
+                  placeholder="••••••••"
+                  className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-teal-500 pr-10 text-slate-800 font-mono font-bold"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition"
                 >
                   {showPassword ? (
                     <EyeOff className="w-4 h-4" />
@@ -253,17 +253,12 @@ export default function LoginPage() {
                   )}
                 </button>
               </div>
-              {loginMode === 'admin' && (
-                <span className="text-[10px] text-slate-400 block mt-1">
-                  Default PIN: <strong className="font-mono text-slate-600">123456</strong>
-                </span>
-              )}
             </div>
 
             <Button
               type="submit"
               disabled={isSubmitting}
-              className={`w-full font-bold text-xs py-5 rounded-xl flex items-center justify-center gap-2 mt-2 shadow-sm transition ${
+              className={`w-full font-bold text-xs sm:text-sm py-5 rounded-xl flex items-center justify-center gap-2 mt-2 shadow-sm transition ${
                 loginMode === 'admin'
                   ? 'bg-amber-600 hover:bg-amber-700 text-white'
                   : 'bg-teal-700 hover:bg-teal-800 text-white'
@@ -286,14 +281,14 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="pt-2 border-t border-slate-100 text-center">
+          <div className="pt-3 border-t border-slate-100 text-center">
             <p className="text-xs text-slate-500 mb-2">Belum mendaftarkan toko?</p>
             <Link href="/toko/tambah">
               <Button
                 variant="outline"
-                className="w-full text-xs border-slate-200 text-slate-700 font-semibold hover:bg-slate-50"
+                className="w-full text-xs sm:text-sm border-slate-200 text-slate-700 font-semibold hover:bg-slate-50 rounded-xl"
               >
-                <PlusCircle className="w-3.5 h-3.5 mr-1.5 text-teal-600" /> Daftar Toko Baru
+                <PlusCircle className="w-4 h-4 mr-1.5 text-teal-600" /> Daftar Toko Baru
               </Button>
             </Link>
           </div>
