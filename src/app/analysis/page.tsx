@@ -23,6 +23,7 @@ import {
   Download,
   LogOut,
   LogIn,
+  Lock,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -62,18 +63,18 @@ export default function AnalysisPage() {
   const [dailyAvgKwh, setDailyAvgKwh] = useState<number>(0);
   const [monthlyEstKwh, setMonthlyEstKwh] = useState<number>(0);
   const [monthlyEstCost, setMonthlyEstCost] = useState<number>(0);
-  const [isTestInterval, setIsTestInterval] = useState<boolean>(false);
 
   // Status Lonjakan Jam Berjalan
   const [isSpike, setIsSpike] = useState<boolean>(false);
   const [spikePercent, setSpikePercent] = useState<number>(0);
 
-  const NORMAL_HOURLY_THRESHOLD = 10.0; // Ambang batas normal (10 kWh/jam)
+  const NORMAL_HOURLY_THRESHOLD = 10.0;
 
   useEffect(() => {
     const role = localStorage.getItem('user_role');
     const storeId = localStorage.getItem('active_store_id');
 
+    // CEK SESI AUTENTIKASI REAL
     if (storeId && role) {
       setIsLoggedIn(true);
       setUserRole(role);
@@ -81,28 +82,36 @@ export default function AnalysisPage() {
       if (role !== 'admin') {
         setSelectedMeterId(storeId);
       }
+      fetchAnalysisData(role, storeId);
     } else {
+      // JIKA GUEST / LOGOUT: Hentikan loading & reset data
       setIsLoggedIn(false);
       setUserRole('staff');
       setActiveStoreId(null);
+      setStoreAnalysisList([]);
+      setLoading(false);
     }
-
-    fetchAnalysisData(role, storeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId]);
 
   const fetchAnalysisData = async (roleParam?: string | null, activeStoreIdParam?: string | null) => {
     setLoading(true);
     try {
-      const currentRole = roleParam ?? (localStorage.getItem('user_role') || 'staff');
+      const currentRole = roleParam ?? localStorage.getItem('user_role');
       const currentActiveStore = activeStoreIdParam ?? localStorage.getItem('active_store_id');
+
+      // KEAMANAN LOGIKA: Jika tidak ada session toko/login, JANGAN ambil data dari Supabase
+      if (!currentActiveStore && currentRole !== 'admin') {
+        setStoreAnalysisList([]);
+        setLoading(false);
+        return;
+      }
 
       let query = supabase
         .from('meters')
         .select('id, store_name, meter_number, power_va')
         .order('created_at', { ascending: false });
 
-      // RBAC: Kunci query hanya ke toko miliknya sendiri jika BUKAN Admin
       if (currentRole !== 'admin' && currentActiveStore) {
         query = query.eq('id', currentActiveStore);
       }
@@ -111,7 +120,6 @@ export default function AnalysisPage() {
       let currentMeters = metersData || [];
       setMeters(currentMeters);
 
-      // Ambil analisis detail untuk semua toko
       const detailedAnalysisList: StoreAnalysisItem[] = [];
       if (currentMeters.length > 0) {
         for (const m of currentMeters) {
@@ -154,7 +162,7 @@ export default function AnalysisPage() {
       } else {
         const activeTargetId = selectedMeterId === 'all' ? currentMeters[0]?.id : selectedMeterId;
         const activeItem = detailedAnalysisList.find((m) => m.id === activeTargetId);
-        
+
         if (activeItem) {
           applyMetrics(activeItem.hourlyRate, activeItem.monthlyCost);
         } else if (activeTargetId) {
@@ -195,12 +203,9 @@ export default function AnalysisPage() {
 
     if (previousVal >= latestVal) {
       const consumedKwh = previousVal - latestVal;
-
       if (diffHours >= 0.25) {
-        setIsTestInterval(false);
         return { rate: consumedKwh / diffHours, latestKwh: latestVal };
       } else if (diffHours > 0) {
-        setIsTestInterval(true);
         return { rate: consumedKwh, latestKwh: latestVal };
       }
     }
@@ -229,7 +234,6 @@ export default function AnalysisPage() {
     setMonthlyEstCost(calculatedMonthlyCost);
   };
 
-  // Fungsi Logout: Hapus seluruh cache & jalankan hard refresh ke /login
   const handleLogout = async () => {
     try {
       setIsLoggedIn(false);
@@ -246,7 +250,6 @@ export default function AnalysisPage() {
     }
   };
 
-  // FUNGSI EXPORT DATA LAPORAN KE CSV
   const handleExportCSV = () => {
     if (storeAnalysisList.length === 0) return;
 
@@ -295,30 +298,10 @@ export default function AnalysisPage() {
   };
 
   const deviceEstimates = [
-    {
-      name: 'AC & Pendingin Toko',
-      usageKwh: (dailyAvgKwh * 0.42).toFixed(1),
-      percent: 42,
-      color: 'bg-teal-600',
-    },
-    {
-      name: 'Kulkas / Showcase Minuman',
-      usageKwh: (dailyAvgKwh * 0.28).toFixed(1),
-      percent: 28,
-      color: 'bg-emerald-600',
-    },
-    {
-      name: 'Penerangan & Lampu Toko',
-      usageKwh: (dailyAvgKwh * 0.18).toFixed(1),
-      percent: 18,
-      color: 'bg-amber-500',
-    },
-    {
-      name: 'Komputer Kasir & Perangkat Elektronik',
-      usageKwh: (dailyAvgKwh * 0.12).toFixed(1),
-      percent: 12,
-      color: 'bg-indigo-500',
-    },
+    { name: 'AC & Pendingin Toko', usageKwh: (dailyAvgKwh * 0.42).toFixed(1), percent: 42, color: 'bg-teal-600' },
+    { name: 'Kulkas / Showcase Minuman', usageKwh: (dailyAvgKwh * 0.28).toFixed(1), percent: 28, color: 'bg-emerald-600' },
+    { name: 'Penerangan & Lampu Toko', usageKwh: (dailyAvgKwh * 0.18).toFixed(1), percent: 18, color: 'bg-amber-500' },
+    { name: 'Komputer Kasir & Elektronik', usageKwh: (dailyAvgKwh * 0.12).toFixed(1), percent: 12, color: 'bg-indigo-500' },
   ];
 
   const potentialSavingsMonthly = monthlyEstCost * 0.15;
@@ -354,15 +337,17 @@ export default function AnalysisPage() {
             </Link>
           )}
 
-          <Button
-            size="sm"
-            onClick={handleExportCSV}
-            className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold gap-1 px-2.5 h-8 shadow-sm"
-          >
-            <Download className="w-3.5 h-3.5" /> CSV
-          </Button>
+          {isLoggedIn && (
+            <Button
+              size="sm"
+              onClick={handleExportCSV}
+              className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold gap-1 px-2.5 h-8 shadow-sm"
+            >
+              <Download className="w-3.5 h-3.5" /> CSV
+            </Button>
+          )}
 
-          {meters.length > 0 && userRole === 'admin' && (
+          {isLoggedIn && meters.length > 0 && userRole === 'admin' && (
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
@@ -384,9 +369,29 @@ export default function AnalysisPage() {
           <RefreshCw className="w-5 h-5 animate-spin" />
           <span className="text-sm">Menghitung analisis energi...</span>
         </div>
+      ) : !isLoggedIn ? (
+        /* TAMPILAN JIKA TIDAK LOGIN / LOGOUT */
+        <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Akses Analisis Terkunci</h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                Silakan masuk menggunakan Kode Toko / ID PLN Anda untuk melihat analisis konsumsi dan proyeksi biaya energi toko Anda.
+              </p>
+            </div>
+            <Link href="/login" className="inline-block">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-6 py-2">
+                <LogIn className="w-4 h-4 mr-1.5" /> Masuk ke Toko
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
       ) : (
+        /* TAMPILAN JIKA BERHASIL LOGIN */
         <>
-          {/* TABEL PERBANDINGAN SEMUA TOKO */}
           {storeAnalysisList.length > 0 && (
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-2">
