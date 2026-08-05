@@ -49,7 +49,6 @@ export default function AiPage() {
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
-  // Metrik Terintegrasi
   const [currentKwh, setCurrentKwh] = useState<number>(0);
   const [dailyKwh, setDailyKwh] = useState<number>(0);
   const [hourlyKwh, setHourlyKwh] = useState<number>(0);
@@ -58,15 +57,12 @@ export default function AiPage() {
   const [activePowerVa, setActivePowerVa] = useState<number>(1300);
   const [todaySessions, setTodaySessions] = useState<TodayScanSession[]>([]);
 
-  // Status AI Health
   const [healthStatus, setHealthStatus] = useState<'normal' | 'warning' | 'critical'>('normal');
 
-  // Rekomendasi Token AI & Simulator
   const [recCost, setRecCost] = useState<number>(0);
   const [recKwh, setRecKwh] = useState<number>(0);
   const [customAmount, setCustomAmount] = useState<number>(500000);
 
-  // Chat AI State
   const [messages, setMessages] = useState<{ sender: 'ai' | 'user'; text: string }[]>([
     {
       sender: 'ai',
@@ -75,7 +71,6 @@ export default function AiPage() {
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
 
-  // Inisialisasi state awal dari localStorage
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
     const storedRole = localStorage.getItem('user_role');
@@ -152,7 +147,6 @@ export default function AiPage() {
       const currentTariffRate = getTariffRate(powerVa);
       setActiveTariff(currentTariffRate);
 
-      // 1. Ambil pindaian hingga 3 data terakhir untuk kalkulasi laju presisi
       const { data: readings } = await supabase
         .from('meter_readings')
         .select('kwh, meter_value, created_at')
@@ -160,7 +154,6 @@ export default function AiPage() {
         .order('created_at', { ascending: false })
         .limit(3);
 
-      // 2. Ambil perbandingan pindaian HARI INI
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
@@ -266,7 +259,6 @@ export default function AiPage() {
   const simulatedKwh = customAmount / (activeTariff || 1444.7);
   const simulatedDays = dailyKwh > 0 ? (simulatedKwh / dailyKwh).toFixed(1) : '0';
 
-  // --- ENGINE CHAT AI KELISTRIKAN PINTAR DENGAN ANALISIS SESSION SCAN ---
   const handleSendMessage = () => {
     if (!inputPrompt.trim()) return;
 
@@ -281,7 +273,6 @@ export default function AiPage() {
       const maxSafeWatts = Math.round(activePowerVa * 0.8);
       const storeName = meters.find((m) => m.id === selectedMeterId)?.store_name || 'Toko Ini';
 
-      // REGEX ENGINE: Deteksi Input Watt, Jam, dan Jumlah Peralatan
       const wattMatch = q.match(/(\d+)\s*(watt|w\b)/);
       const hourMatch = q.match(/(\d+)\s*(jam|hours|h\b)/);
       const qtyMatch = q.match(/(\d+)\s*(biji|buah|unit|pcs)/);
@@ -321,34 +312,6 @@ export default function AiPage() {
           response = `📊 **Breakdown Pindaian Hari Ini (${storeName}):**\n\n${sessionText}\n\n💡 **AI Insight:** Pastikan pemakaian di sesi siang terpantau ketat karena beban pendingin (AC & Showcase) mencapai puncaknya.`;
         }
       }
-      else if (q.includes('showcase') || q.includes('kulkas') || q.includes('freezer')) {
-        const estWatts = 250;
-        const estKwhDay = (estWatts * 24) / 1000;
-        const estCostDay = estKwhDay * activeTariff;
-
-        response = `🥤 **Analisis Beban Showcase / Kulkas:**\n\n` +
-          `• **Karakteristik:** Menggunakan kompresor. Lonjakan awal (*starting current*) bisa naik **2x-3x lipat** dari watt normal.\n` +
-          `• **Estimasi Standar (~250W):** ${estKwhDay.toFixed(1)} kWh/hari (~Rp ${Math.round(estCostDay).toLocaleString('id-ID')}/hari).\n\n` +
-          `💡 **Tips Hemat:** Beri jarak belakang showcase minimal 15 cm dari dinding agar sirkulasi panas kompresor lancar.`;
-      } 
-      else if (q.includes('ac') || q.includes('pendingin') || q.includes('suhu')) {
-        const estWatts = 800;
-        const estHours = 12;
-        const estKwhDay = (estWatts * estHours) / 1000;
-        const estCostDay = estKwhDay * activeTariff;
-
-        response = `❄️ **Analisis Beban AC Toko:**\n\n` +
-          `AC menyerap sekitar 40-50% dari total listrik toko. AC 1 PK (~${estWatts} Watt) beroperasi ${estHours} jam menyerap **${estKwhDay.toFixed(1)} kWh/hari** (~Rp ${Math.round(estCostDay).toLocaleString('id-ID')}/hari).\n\n` +
-          `💡 **Tips Hemat:** Naikkan suhu remote dari 18°C ke **23°C–24°C** untuk menghemat hingga 15% energi.`;
-      } 
-      else if (q.includes('bocor') || q.includes('boros') || q.includes('lonjakan')) {
-        response = `🔍 **Deteksi Kebocoran / Anomali Listrik Toko:**\n\n` +
-          `Jika pemakaian tiba-tiba melonjak tinggi, cek hal berikut:\n` +
-          `1. **Karet Pintu Showcase Renggang:** Kompresor beroperasi 24 jam nonstop.\n` +
-          `2. **Filter AC Kotor:** Memaksa kompresor bekerja ekstra keras.\n` +
-          `3. **Stopkontak Longgar / Panas:** Indikasi adanya *Arus Bocor* ke grounding.\n\n` +
-          `*Rekomendasi:* Lakukan pindaian meteran 3x sehari untuk melacak jam terjadinya lonjakan secara presisi.`;
-      }
       else {
         response = `Saya adalah Asisten AI Kelistrikan Toko (${storeName} - ${activePowerVa} VA).\n\n` +
           `Anda bisa mengetik pertanyaan seperti:\n` +
@@ -363,34 +326,34 @@ export default function AiPage() {
   };
 
   return (
-    <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
       {/* Header Info & Actions */}
       <div className="flex justify-between items-center gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-teal-600" /> AI Health & Insight
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-2">
+            <Cpu className="w-6 h-6 text-teal-600" /> AI Health & Intelligent Consult
           </h1>
-          <p className="text-xs text-slate-500">Rekomendasi optimasi daya real-time</p>
+          <p className="text-xs sm:text-sm text-slate-500">Rekomendasi optimasi daya real-time</p>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
               variant="outline"
-              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-3 h-9"
             >
-              <LogOut className="w-3.5 h-3.5" /> Keluar
+              <LogOut className="w-4 h-4" /> Keluar
             </Button>
           ) : (
             <Link href="/login">
               <Button
                 size="sm"
                 variant="outline"
-                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-3 h-9"
               >
-                <LogIn className="w-3.5 h-3.5" /> Masuk
+                <LogIn className="w-4 h-4" /> Masuk
               </Button>
             </Link>
           )}
@@ -399,7 +362,7 @@ export default function AiPage() {
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
-              className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm h-8"
+              className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm h-9"
             >
               {meters.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -412,238 +375,247 @@ export default function AiPage() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center items-center py-12 text-slate-400 gap-2">
-          <RefreshCw className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Analisis AI sedang berjalan...</span>
+        <div className="flex justify-center items-center py-20 text-slate-400 gap-2">
+          <RefreshCw className="w-6 h-6 animate-spin" />
+          <span className="text-base font-medium">Analisis AI sedang berjalan...</span>
         </div>
       ) : !isLoggedIn ? (
         <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
-          <CardContent className="p-8 text-center space-y-4">
-            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-              <Lock className="w-6 h-6" />
+          <CardContent className="p-12 text-center space-y-4">
+            <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-800 text-sm">Fitur AI Terkunci</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+              <h3 className="font-bold text-slate-800 text-base">Fitur AI Terkunci</h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
                 Silakan masuk menggunakan Kode Toko / ID PLN Anda untuk berkonsultasi dengan Asisten AI dan melihat analisis daya.
               </p>
             </div>
             <Link href="/login" className="inline-block">
-              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-6 py-2">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-8 py-2.5">
                 <LogIn className="w-4 h-4 mr-1.5" /> Masuk ke Toko
               </Button>
             </Link>
           </CardContent>
         </Card>
       ) : (
-        <>
-          {/* Status Kesehatan Energi AI */}
-          <Card
-            className={`border-l-4 shadow-sm ${
-              healthStatus === 'critical'
-                ? 'border-l-rose-500 bg-rose-50/40'
-                : healthStatus === 'warning'
-                ? 'border-l-amber-500 bg-amber-50/40'
-                : 'border-l-emerald-500 bg-emerald-50/40'
-            }`}
-          >
-            <CardContent className="p-4 flex items-start gap-3">
-              {healthStatus === 'critical' ? (
-                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              ) : healthStatus === 'warning' ? (
-                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              ) : (
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-              )}
+        /* LAYOUT DESKTOP 2 KOLOM */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          {/* KOLOM KIRI (SIMULATOR & HEALTH) */}
+          <div className="space-y-6">
+            
+            {/* Status Kesehatan Energi AI */}
+            <Card
+              className={`border-l-4 shadow-sm ${
+                healthStatus === 'critical'
+                  ? 'border-l-rose-500 bg-rose-50/40'
+                  : healthStatus === 'warning'
+                  ? 'border-l-amber-500 bg-amber-50/40'
+                  : 'border-l-emerald-500 bg-emerald-50/40'
+              }`}
+            >
+              <CardContent className="p-5 flex items-start gap-3">
+                {healthStatus === 'critical' ? (
+                  <AlertTriangle className="w-6 h-6 text-rose-600 shrink-0 mt-0.5" />
+                ) : healthStatus === 'warning' ? (
+                  <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                ) : (
+                  <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                )}
 
-              <div className="space-y-1 text-xs">
-                <span className="font-bold text-slate-800 text-sm block">
-                  {healthStatus === 'critical'
-                    ? 'Status Penggunaan: Kritis (Sisa Token Rendah)'
-                    : healthStatus === 'warning'
-                    ? 'Status Penggunaan: Tinggi / Anomali Deteksi'
-                    : 'Status Penggunaan: Normal & Efisien'}
-                </span>
-                <p className="text-slate-600 leading-relaxed">
-                  {healthStatus === 'critical'
-                    ? `Sisa token sebesar ${currentKwh.toFixed(1)} kWh diprediksi akan habis dalam ${daysRemaining} hari. Segera lakukan pengisian token.`
-                    : `Laju konsumsi terdeteksi ${hourlyKwh.toFixed(2)} kWh/jam (rata-rata ${dailyKwh.toFixed(1)} kWh/hari). Tidak terdeteksi adanya kebocoran arus mendadak.`}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+                <div className="space-y-1 text-xs sm:text-sm">
+                  <span className="font-bold text-slate-800 text-base block">
+                    {healthStatus === 'critical'
+                      ? 'Status Penggunaan: Kritis (Sisa Token Rendah)'
+                      : healthStatus === 'warning'
+                      ? 'Status Penggunaan: Tinggi / Anomali Deteksi'
+                      : 'Status Penggunaan: Normal & Efisien'}
+                  </span>
+                  <p className="text-slate-600 leading-relaxed text-xs">
+                    {healthStatus === 'critical'
+                      ? `Sisa token sebesar ${currentKwh.toFixed(1)} kWh diprediksi akan habis dalam ${daysRemaining} hari. Segera lakukan pengisian token.`
+                      : `Laju konsumsi terdeteksi ${hourlyKwh.toFixed(2)} kWh/jam (rata-rata ${dailyKwh.toFixed(1)} kWh/hari). Tidak terdeteksi adanya kebocoran arus mendadak.`}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
 
-          {/* PERBANDINGAN PINDAIAN SESI HARI INI */}
-          <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
-            <CardHeader className="pb-2 pt-3 px-4">
-              <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                <span>📊 Log Pindaian Sesi Hari Ini</span>
-                <span className="text-[10px] text-teal-700 font-normal">
-                  {todaySessions.length}x Pindaian Sukses
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-3 space-y-2">
-              {todaySessions.length === 0 ? (
-                <p className="text-[11px] text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
-              ) : (
-                todaySessions.map((s, idx) => (
-                  <div
-                    key={s.id}
-                    className="bg-white p-2.5 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
-                  >
-                    <div className="flex items-center gap-2">
-                      {idx === 0 ? (
-                        <Sun className="w-4 h-4 text-amber-500" />
-                      ) : idx === 1 ? (
-                        <Sunset className="w-4 h-4 text-orange-500" />
-                      ) : (
-                        <Moon className="w-4 h-4 text-indigo-500" />
-                      )}
-                      <div>
-                        <span className="font-bold text-slate-800 block text-[11px]">{s.sessionName}</span>
-                        <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+            {/* PERBANDINGAN PINDAIAN SESI HARI INI */}
+            <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
+              <CardHeader className="pb-2 pt-4 px-5">
+                <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                  <span>📊 Log Pindaian Sesi Hari Ini</span>
+                  <span className="text-[11px] text-teal-700 font-normal">
+                    {todaySessions.length}x Pindaian Sukses
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-5 pb-4 space-y-2.5">
+                {todaySessions.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
+                ) : (
+                  todaySessions.map((s, idx) => (
+                    <div
+                      key={s.id}
+                      className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        {idx === 0 ? (
+                          <Sun className="w-4 h-4 text-amber-500" />
+                        ) : idx === 1 ? (
+                          <Sunset className="w-4 h-4 text-orange-500" />
+                        ) : (
+                          <Moon className="w-4 h-4 text-indigo-500" />
+                        )}
+                        <div>
+                          <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
+                          <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                        {s.consumptionFromPrev !== null && (
+                          <span className="text-[10px] text-rose-600 font-bold block">
+                            Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                          </span>
+                        )}
                       </div>
                     </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
 
-                    <div className="text-right">
-                      <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
-                      {s.consumptionFromPrev !== null && (
-                        <span className="text-[10px] text-rose-600 font-bold block">
-                          Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
-                        </span>
-                      )}
-                    </div>
+            {/* Simulator & Saran Pembelian Token AI */}
+            <Card className="border-slate-200 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center justify-between text-slate-800">
+                  <div className="flex items-center gap-2">
+                    <BatteryCharging className="w-5 h-5 text-amber-500" />
+                    Saran Pembelian Token AI
                   </div>
-                ))
-              )}
-            </CardContent>
-          </Card>
+                  <span className="text-xs text-teal-700 font-bold bg-teal-50 px-2.5 py-0.5 rounded-full">
+                    Interactive
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-1">
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Berdasarkan tren harian, sisa token saat ini (<strong>{currentKwh.toFixed(1)} kWh</strong>) diprediksi habis dalam{' '}
+                  <strong className={daysRemaining < 3 ? 'text-rose-600 font-extrabold' : 'text-teal-700'}>
+                    {daysRemaining} hari
+                  </strong>{' '}
+                  lagi.
+                </p>
 
-          {/* Simulator & Saran Pembelian Token AI */}
-          <Card className="border-slate-200 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center justify-between text-slate-800">
-                <div className="flex items-center gap-2">
-                  <BatteryCharging className="w-4 h-4 text-amber-500" />
-                  Saran Pembelian Token AI
+                {/* Simulator Pilihan Nominal Token */}
+                <div className="space-y-2">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Pilih Nominal untuk Simulasi Daya Tahan:
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[200000, 500000, 1000000].map((amt) => (
+                      <Button
+                        key={amt}
+                        size="sm"
+                        variant={customAmount === amt ? 'default' : 'outline'}
+                        className={`text-xs ${
+                          customAmount === amt
+                            ? 'bg-teal-700 hover:bg-teal-800 text-white font-bold'
+                            : 'text-slate-700'
+                        }`}
+                        onClick={() => setCustomAmount(amt)}
+                      >
+                        Rp {(amt / 1000).toLocaleString('id-ID')}rb
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-                <span className="text-[10px] text-teal-700 font-bold bg-teal-50 px-2 py-0.5 rounded-full">
-                  Interactive
-                </span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 pt-1">
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Berdasarkan tren harian, sisa token saat ini (<strong>{currentKwh.toFixed(1)} kWh</strong>) diprediksi habis dalam{' '}
-                <strong className={daysRemaining < 3 ? 'text-rose-600 font-extrabold' : 'text-teal-700'}>
-                  {daysRemaining} hari
-                </strong>{' '}
-                lagi.
-              </p>
 
-              {/* Simulator Pilihan Nominal Token */}
-              <div className="space-y-2">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
-                  Pilih Nominal untuk Simulasi Daya Tahan:
-                </span>
-                <div className="grid grid-cols-3 gap-2">
-                  {[200000, 500000, 1000000].map((amt) => (
-                    <Button
-                      key={amt}
-                      size="sm"
-                      variant={customAmount === amt ? 'default' : 'outline'}
-                      className={`text-xs ${
-                        customAmount === amt
-                          ? 'bg-teal-700 hover:bg-teal-800 text-white font-bold'
-                          : 'text-slate-700'
+                {/* Display Proyeksi Dynamic */}
+                <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-4 text-center space-y-1">
+                  <span className="text-xs font-semibold text-slate-600 block">
+                    Proyeksi Token Rp {customAmount.toLocaleString('id-ID')}:
+                  </span>
+                  <div className="text-2xl font-extrabold text-teal-900">
+                    +{simulatedDays} Hari Operasional
+                  </div>
+                  <div className="text-xs text-slate-500 font-mono">
+                    Mendapatkan ~{simulatedKwh.toFixed(1)} kWh dengan laju {dailyKwh.toFixed(1)} kWh/hari
+                  </div>
+                </div>
+
+                {/* Action Button */}
+                <a
+                  href="https://www.tokopedia.com/pln/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-full"
+                >
+                  <Button className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-3 flex items-center justify-center gap-2 rounded-xl shadow-sm">
+                    <ShoppingBag className="w-4 h-4" /> Beli Token PLN Sekarang
+                    <ExternalLink className="w-4 h-4 opacity-70" />
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* KOLOM KANAN (CHATBOT ASISTEN AI FULL HEIGHT DESKTOP) */}
+          <div>
+            <Card className="border-slate-200 shadow-sm h-full flex flex-col">
+              <CardHeader className="pb-3 border-b border-slate-100">
+                <CardTitle className="text-sm flex items-center gap-2 text-slate-800">
+                  <Sparkles className="w-4 h-4 text-teal-600 fill-teal-100" />
+                  Tanya Asisten AI Kelistrikan Toko
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 pt-4 flex-1 flex flex-col justify-between">
+                <div className="h-96 lg:h-[450px] overflow-y-auto border border-slate-100 rounded-xl p-4 space-y-3 bg-slate-50/50 text-xs">
+                  {messages.map((msg, idx) => (
+                    <div
+                      key={idx}
+                      className={`flex ${
+                        msg.sender === 'user' ? 'justify-end' : 'justify-start'
                       }`}
-                      onClick={() => setCustomAmount(amt)}
                     >
-                      Rp {(amt / 1000).toLocaleString('id-ID')}rb
-                    </Button>
+                      <div
+                        className={`p-3 rounded-2xl max-w-[85%] leading-relaxed ${
+                          msg.sender === 'user'
+                            ? 'bg-teal-700 text-white rounded-br-none'
+                            : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-xs whitespace-pre-line'
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                    </div>
                   ))}
                 </div>
-              </div>
 
-              {/* Display Proyeksi Dynamic */}
-              <div className="bg-teal-50/70 border border-teal-200 rounded-xl p-3.5 text-center space-y-1">
-                <span className="text-[11px] font-semibold text-slate-600 block">
-                  Proyeksi Token Rp {customAmount.toLocaleString('id-ID')}:
-                </span>
-                <div className="text-xl font-extrabold text-teal-900">
-                  +{simulatedDays} Hari Operasional
-                </div>
-                <div className="text-[10px] text-slate-500 font-mono">
-                  Mendapatkan ~{simulatedKwh.toFixed(1)} kWh dengan laju {dailyKwh.toFixed(1)} kWh/hari
-                </div>
-              </div>
-
-              {/* Action Button */}
-              <a
-                href="https://www.tokopedia.com/pln/"
-                target="_blank"
-                rel="noreferrer"
-                className="block w-full"
-              >
-                <Button className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-2.5 flex items-center justify-center gap-2 rounded-xl shadow-sm">
-                  <ShoppingBag className="w-4 h-4" /> Beli Token PLN Sekarang
-                  <ExternalLink className="w-3.5 h-3.5 opacity-70" />
-                </Button>
-              </a>
-            </CardContent>
-          </Card>
-
-          {/* Fitur Chatbot Asisten AI Interaktif */}
-          <Card className="border-slate-200 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2 text-slate-800">
-                <Sparkles className="w-4 h-4 text-teal-600 fill-teal-100" />
-                Tanya Asisten AI Listrik
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-1">
-              <div className="h-40 overflow-y-auto border border-slate-100 rounded-lg p-3 space-y-2 bg-slate-50/50 text-xs">
-                {messages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${
-                      msg.sender === 'user' ? 'justify-end' : 'justify-start'
-                    }`}
+                <div className="flex gap-2 pt-2">
+                  <input
+                    type="text"
+                    placeholder="Tanya AI (contoh: 'Bagaimana hasil pindaian sesi hari ini?')..."
+                    value={inputPrompt}
+                    onChange={(e) => setInputPrompt(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    className="flex-1 text-xs border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+                  />
+                  <Button
+                    size="sm"
+                    className="bg-teal-700 hover:bg-teal-800 text-white px-5 rounded-xl h-auto"
+                    onClick={handleSendMessage}
                   >
-                    <div
-                      className={`p-2.5 rounded-xl max-w-[85%] leading-relaxed ${
-                        msg.sender === 'user'
-                          ? 'bg-teal-700 text-white rounded-br-none'
-                          : 'bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-xs whitespace-pre-line'
-                      }`}
-                    >
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                    <Send className="w-4 h-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Tanya AI (contoh: 'Bagaimana hasil pindaian sesi hari ini?')..."
-                  value={inputPrompt}
-                  onChange={(e) => setInputPrompt(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                  className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <Button
-                  size="sm"
-                  className="bg-teal-700 hover:bg-teal-800 text-white px-3"
-                  onClick={handleSendMessage}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </>
+        </div>
       )}
     </div>
   );
