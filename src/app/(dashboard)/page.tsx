@@ -35,19 +35,11 @@ export default function DashboardPage() {
 
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
-  const [remainingTokenKwh, setRemainingTokenKwh] = useState<number>(0);
-  const [totalEstimatedRupiah, setTotalEstimatedRupiah] = useState<number>(0);
-  const [avgHourlyRateAll, setAvgHourlyRateAll] = useState<number>(0);
-
-  const [intelligenceScore, setIntelligenceScore] = useState<number>(0);
-  const [totalTodayScans, setTotalTodayScans] = useState<number>(0);
-  const [daysLeft, setDaysLeft] = useState<number>(0);
 
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
     const storedRole = localStorage.getItem('user_role');
 
-    // VALIDASI SESI LOGGED IN
     if (storedStoreId && storedRole) {
       setIsLoggedIn(true);
       setActiveStoreId(storedStoreId);
@@ -69,19 +61,16 @@ export default function DashboardPage() {
       const currentRole = roleParam ?? (localStorage.getItem('user_role') || 'staff');
       const currentStoreId = storeIdParam ?? localStorage.getItem('active_store_id');
 
-      // GUARD KEAMANAN: Hentikan fetch jika tidak ada sesi login toko
       if (!currentStoreId && currentRole !== 'admin') {
         setMetersData([]);
         setLoading(false);
         return;
       }
 
-      // 1. Ambil daftar toko dengan filter RBAC
       let query = supabase
         .from('meters')
         .select('id, name, store_name, meter_number, power_va, created_at, role');
 
-      // BUKAN ADMIN: Kunci query hanya ke toko miliknya sendiri
       if (currentRole !== 'admin' && currentStoreId) {
         query = query.eq('id', currentStoreId);
       }
@@ -96,30 +85,23 @@ export default function DashboardPage() {
         return;
       }
 
-      // Jika role staff, paksa selector toko ke tokonya saja (bukan 'all')
       if (currentRole !== 'admin' && meters[0]) {
         setSelectedMeterId(meters[0].id);
+      } else if (currentRole === 'admin') {
+        setSelectedMeterId('all');
       }
-
-      let accumLastReadings = 0;
-      let accumHourlyRate = 0;
-      let accumRupiah = 0;
-      let globalTodayScanSum = 0;
 
       const computedMeters: MeterWithReading[] = [];
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
-      // 2. Query data scan TERBARU & hitung scan HARI INI untuk tiap toko
       for (const m of meters) {
-        const { data: readings, error: readErr } = await supabase
+        const { data: readings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
           .eq('meter_id', m.id)
           .order('created_at', { ascending: false })
           .limit(2);
-
-        if (readErr) console.warn(`Error fetching readings for ${m.id}:`, readErr);
 
         const { data: todayReadings } = await supabase
           .from('meter_readings')
@@ -128,7 +110,6 @@ export default function DashboardPage() {
           .gte('created_at', startOfToday.toISOString());
 
         const scanCountToday = todayReadings?.length || 0;
-        globalTodayScanSum += scanCountToday;
 
         let lastVal: number | null = null;
         let hourlyRate = 0;
@@ -162,8 +143,6 @@ export default function DashboardPage() {
               } else if (intervalHours > 0) {
                 hourlyRate = consumedKwh;
               }
-            } else {
-              hourlyRate = 0;
             }
 
             dailyProj = hourlyRate * 24;
@@ -173,13 +152,6 @@ export default function DashboardPage() {
         }
 
         const storePowerVa = m.power_va || 1300;
-        const tariff = getTariffRate(storePowerVa);
-
-        if (lastVal !== null) {
-          accumLastReadings += lastVal;
-          accumRupiah += lastVal * tariff;
-        }
-        accumHourlyRate += hourlyRate;
 
         computedMeters.push({
           id: m.id,
@@ -198,29 +170,6 @@ export default function DashboardPage() {
       }
 
       setMetersData(computedMeters);
-      setTotalTodayScans(globalTodayScanSum);
-
-      setRemainingTokenKwh(accumLastReadings);
-      setTotalEstimatedRupiah(accumRupiah);
-
-      const avgHourly = meters.length > 0 ? accumHourlyRate / meters.length : 0;
-      setAvgHourlyRateAll(avgHourly);
-
-      const totalDailyUsage = accumHourlyRate * 24;
-      const estimatedDays = totalDailyUsage > 0
-        ? Math.max(0, Math.floor(accumLastReadings / totalDailyUsage))
-        : 0;
-      setDaysLeft(estimatedDays);
-
-      let calculatedScore = 85;
-      if (estimatedDays <= 2) calculatedScore -= 30;
-      else if (estimatedDays <= 5) calculatedScore -= 15;
-
-      if (avgHourly > 15) calculatedScore -= 15;
-      if (globalTodayScanSum >= 2) calculatedScore += 10;
-
-      const finalScore = Math.min(99, Math.max(25, calculatedScore));
-      setIntelligenceScore(finalScore);
 
     } catch (err: any) {
       console.error('Error fetching dashboard:', err?.message || err);
@@ -229,7 +178,7 @@ export default function DashboardPage() {
     }
   };
 
-  // Realtime subscription
+  // Realtime Subscription
   useEffect(() => {
     if (!isLoggedIn) return;
 
@@ -267,36 +216,38 @@ export default function DashboardPage() {
     }
   };
 
-  const filteredMeters = selectedMeterId === 'all'
+  // --- LOGIKA MENGHITUNG METRIK DASHBOARD (GLOBAL vs SINGLE) ---
+  const isAllMode = selectedMeterId === 'all';
+  const filteredMeters = isAllMode
     ? metersData
-    : metersData.filter(m => m.id === selectedMeterId);
+    : metersData.filter((m) => m.id === selectedMeterId);
 
-  const displayTokenKwh = selectedMeterId === 'all'
-    ? remainingTokenKwh
-    : filteredMeters[0]?.lastReading ?? 0;
+  // 1. Total Sisa Token (kWh)
+  const displayTokenKwh = filteredMeters.reduce((acc, curr) => acc + (curr.lastReading || 0), 0);
 
-  const displayEstimatedRupiah = selectedMeterId === 'all'
-    ? totalEstimatedRupiah
-    : (filteredMeters[0]?.lastReading ?? 0) * getTariffRate(filteredMeters[0]?.power_va ?? 1300);
+  // 2. Total Estimasi Rupiah Sisa Token
+  const displayEstimatedRupiah = filteredMeters.reduce((acc, curr) => {
+    const tariff = getTariffRate(curr.power_va);
+    return acc + (curr.lastReading || 0) * tariff;
+  }, 0);
 
-  const displayHourlyRate = selectedMeterId === 'all'
-    ? avgHourlyRateAll
-    : filteredMeters[0]?.hourlyRate ?? 0;
+  // 3. Laju Konsumsi (kWh/jam)
+  const displayHourlyRate = filteredMeters.reduce((acc, curr) => acc + curr.hourlyRate, 0);
 
-  const displayDaysLeft = selectedMeterId === 'all'
-    ? daysLeft
-    : (displayHourlyRate * 24 > 0 ? Math.max(0, Math.floor(displayTokenKwh / (displayHourlyRate * 24))) : 0);
+  // 4. Estimasi Hari Habis
+  const totalDailyRate = displayHourlyRate * 24;
+  const displayDaysLeft = totalDailyRate > 0 ? Math.max(0, Math.floor(displayTokenKwh / totalDailyRate)) : 0;
 
-  const displayTodayScans = selectedMeterId === 'all'
-    ? totalTodayScans
-    : filteredMeters[0]?.todayScanCount ?? 0;
+  // 5. Total Scan Hari Ini
+  const displayTodayScans = filteredMeters.reduce((acc, curr) => acc + curr.todayScanCount, 0);
 
+  // 6. Score Kesehatan
   const getDisplayScore = () => {
     let score = 85;
     if (displayDaysLeft <= 2) score -= 30;
     else if (displayDaysLeft <= 5) score -= 15;
-    if (displayHourlyRate > 15) score -= 15;
-    if (displayTodayScans >= 2) score += 10;
+    if (displayHourlyRate > 15 * (isAllMode ? Math.max(1, filteredMeters.length) : 1)) score -= 15;
+    if (displayTodayScans >= 2 * (isAllMode ? Math.max(1, filteredMeters.length) : 1)) score += 10;
     return Math.min(99, Math.max(25, score));
   };
 
@@ -304,6 +255,9 @@ export default function DashboardPage() {
 
   const getScanModeText = (count: number) => {
     if (count === 0) return { label: '0 Scan (No Data)', color: 'text-rose-300' };
+    if (isAllMode) {
+      return { label: `${count} Scan Global`, color: 'text-emerald-300' };
+    }
     if (count === 1) return { label: '1 Scan (Basic Mode)', color: 'text-amber-300' };
     if (count === 2) return { label: '2 Scan (Optimal Mode)', color: 'text-emerald-300' };
     return { label: `${count} Scan (Advanced Mode)`, color: 'text-teal-200' };
@@ -317,7 +271,7 @@ export default function DashboardPage() {
       <div className="flex justify-between items-center gap-2">
         <div>
           <h1 className="text-xl font-bold text-slate-800 flex items-center gap-1.5">
-            Halo, Pengelola Toko 👋
+            Halo, {userRole === 'admin' ? 'Owner / Pengawas' : 'Pengelola Toko'} 👋
             {isLoggedIn && userRole === 'admin' && (
               <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-300 flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3" /> Admin
@@ -364,10 +318,9 @@ export default function DashboardPage() {
       {loading ? (
         <div className="flex justify-center items-center py-12 text-slate-400 gap-2">
           <RefreshCw className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Memuat analisis energi toko...</span>
+          <span className="text-sm">Memuat data energi...</span>
         </div>
       ) : !isLoggedIn ? (
-        /* TAMPILAN TERKUNCI JIKA LOGOUT */
         <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
           <CardContent className="p-8 text-center space-y-4">
             <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
@@ -387,15 +340,14 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       ) : (
-        /* TAMPILAN DATA JIKA LOGGED IN */
         <>
-          {/* Energy Intelligence Score Card */}
+          {/* Card Score & Status Scan */}
           <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
             <CardContent className="p-5">
               <div className="flex justify-between items-start">
                 <div>
                   <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase">
-                    Energy Intelligence Score
+                    Energy Intelligence Score {isAllMode ? '(Global)' : ''}
                   </span>
                   <div className="text-4xl font-extrabold mt-1">
                     {currentDisplayScore}<span className="text-lg font-normal text-emerald-300">/100</span>
@@ -426,13 +378,13 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Quick Stats Grid */}
+          {/* Ringkasan Angka (Akumulasi / Spesifik) */}
           <div className="grid grid-cols-2 gap-3">
             <Card className="bg-slate-50 border-slate-200">
               <CardContent className="p-4">
                 <div className="flex items-center space-x-2 text-amber-600 mb-1">
                   <Zap className="w-4 h-4" />
-                  <span className="text-xs font-semibold">Total Sisa Token</span>
+                  <span className="text-xs font-semibold">{isAllMode ? 'Total Sisa Token' : 'Sisa Token Toko'}</span>
                 </div>
                 <div className="text-xl font-bold text-slate-800">
                   {displayTokenKwh.toFixed(1)} <span className="text-xs font-normal">kWh</span>
@@ -459,7 +411,7 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          {/* Selector Toko (Sesuai Hak Akses Role) */}
+          {/* Selector Toko (Sesuai Role) */}
           {metersData.length > 0 && (
             <div className="flex items-center justify-between pt-1">
               <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
@@ -470,7 +422,6 @@ export default function DashboardPage() {
                 onChange={(e) => setSelectedMeterId(e.target.value)}
                 className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm"
               >
-                {/* Opsi 'Semua Toko' HANYA muncul untuk Admin */}
                 {userRole === 'admin' && (
                   <option value="all">Semua Toko ({metersData.length})</option>
                 )}
@@ -559,7 +510,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* AI Insight Box */}
+          {/* AI Energy Insight */}
           <Card className="border-teal-200 bg-teal-50/50">
             <CardHeader className="p-4 pb-2 flex flex-row items-center space-x-2">
               <Cpu className="w-5 h-5 text-teal-700" />
@@ -567,12 +518,12 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="p-4 pt-0 text-xs text-slate-700 space-y-2">
               <p>
-                Rata-rata konsumsi listrik toko Anda saat ini adalah{' '}
+                Rata-rata konsumsi listrik {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} saat ini adalah{' '}
                 <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (sekitar{' '}
                 <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
               </p>
               <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
-                💡 <strong>Rekomendasi :</strong> Lakukan pindaian minimal 3x sehari (pagi, siang & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang lebih presisi.
+                💡 <strong>Rekomendasi :</strong> Pastikan pindaian dilakukan minimal 3x sehari (pagi, siang & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang presisi.
               </div>
             </CardContent>
           </Card>
