@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,7 +17,6 @@ import {
 import Link from 'next/link';
 
 export default function TambahTokoPage() {
-  const router = useRouter();
   const supabase = createClient();
 
   const [storeName, setStoreName] = useState('');
@@ -49,7 +47,7 @@ export default function TambahTokoPage() {
             meter_number: meterNumber.trim(),
             power_va: parseInt(powerVa),
             password: password.trim(),
-            role: 'staff', // Menyimpan role sebagai staff
+            role: 'staff',
           },
         ])
         .select()
@@ -62,8 +60,11 @@ export default function TambahTokoPage() {
         throw insertError;
       }
 
-      // 2. Simpan Sesi Akses Lokal
+      // 2. Bersihkan storage lama & simpan Sesi Akses Lokal Baru
       if (inserted) {
+        localStorage.clear();
+        sessionStorage.clear();
+
         localStorage.setItem('active_store_id', inserted.id);
         localStorage.setItem(
           'active_store_name',
@@ -77,14 +78,13 @@ export default function TambahTokoPage() {
         }
       }
 
-      router.push('/');
-      router.refresh();
+      // 3. Masuk ke Dashboard Utama dengan hard refresh
+      window.location.href = '/';
     } catch (err: any) {
       console.error('Gagal menambah toko:', err);
       setErrorMessage(
         err?.message || 'Terjadi kesalahan saat menyimpan data toko.'
       );
-    } finally {
       setIsSubmitting(false);
     }
   };
@@ -204,11 +204,11 @@ export default function TambahTokoPage() {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl shadow-sm mt-2 transition"
+              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs py-5 rounded-xl shadow-sm mt-2 transition flex items-center justify-center gap-2"
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   Menyimpan Toko...
                 </>
               ) : (
