@@ -24,7 +24,7 @@ interface TableReading {
   store_name: string;
   meter_number: string;
   kwh_value: number;
-  consumption?: number | null; // Selisih pemakaian dari scan sebelumnya
+  consumption?: number | null;
   image_url?: string;
   created_at: string;
 }
@@ -35,6 +35,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('staff');
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false); // STATE LOGIN
   const [readings, setReadings] = useState<TableReading[]>([]);
   const [metersMap, setMetersMap] = useState<
     Record<string, { store_name: string; meter_number: string }>
@@ -49,13 +50,21 @@ export default function HistoryPage() {
   } | null>(null);
 
   useEffect(() => {
-    const role = localStorage.getItem('user_role') || 'staff';
+    const role = localStorage.getItem('user_role');
     const storeId = localStorage.getItem('active_store_id');
-    setUserRole(role);
-    if (storeId) setActiveStoreId(storeId);
-
-    if (role !== 'admin' && storeId) {
-      setSelectedMeterId(storeId);
+    
+    // VALIDASI SESI LOGIN
+    if (storeId && role) {
+      setIsLoggedIn(true);
+      setActiveStoreId(storeId);
+      setUserRole(role);
+      if (role !== 'admin') {
+        setSelectedMeterId(storeId);
+      }
+    } else {
+      setIsLoggedIn(false);
+      setActiveStoreId(null);
+      setUserRole('staff');
     }
   }, []);
 
@@ -67,7 +76,7 @@ export default function HistoryPage() {
   const initHistory = async () => {
     setLoading(true);
     try {
-      const currentRole = localStorage.getItem('user_role') || 'staff';
+      const currentRole = localStorage.getItem('user_role');
       const currentActiveStore = localStorage.getItem('active_store_id');
 
       // 1. Ambil data Toko dengan filter RBAC
@@ -125,7 +134,6 @@ export default function HistoryPage() {
           };
           const currentKwh = Number(item.meter_value ?? item.kwh ?? item.value ?? 0);
 
-          // Hitung konsumsi energi berdasarkan data pindaian sebelumnya
           let consumption: number | null = null;
           const prevReading = readingsData.slice(index + 1).find((r: any) => r.meter_id === item.meter_id);
           if (prevReading) {
@@ -158,6 +166,7 @@ export default function HistoryPage() {
 
   const handleLogout = async () => {
     try {
+      setIsLoggedIn(false);
       setActiveStoreId(null);
       await supabase.auth.signOut();
       localStorage.clear();
@@ -205,7 +214,8 @@ export default function HistoryPage() {
         </div>
 
         <div className="flex items-center gap-1.5">
-          {activeStoreId ? (
+          {/* PENKONDISIAN BERDASARKAN isLoggedIn */}
+          {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
@@ -271,7 +281,6 @@ export default function HistoryPage() {
                   ) : (
                     readings.map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50/80 transition">
-                        {/* Waktu Scan */}
                         <td className="py-2.5 px-3 whitespace-nowrap">
                           <div className="font-semibold text-slate-700 flex items-center gap-1">
                             <Calendar className="w-3 h-3 text-slate-400" />
@@ -283,7 +292,6 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        {/* Nama Toko */}
                         <td className="py-2.5 px-3">
                           <div className="font-bold text-slate-800 flex items-center gap-1">
                             <Store className="w-3 h-3 text-teal-600 shrink-0" />
@@ -292,7 +300,6 @@ export default function HistoryPage() {
                           <div className="text-[10px] text-slate-400 font-mono">{row.meter_number}</div>
                         </td>
 
-                        {/* Sisa & Konsumsi kWh */}
                         <td className="py-2.5 px-3 text-right whitespace-nowrap">
                           <div className="font-extrabold text-slate-800 inline-flex items-center gap-0.5">
                             <Zap className="w-3 h-3 fill-amber-500 text-amber-500" />
@@ -307,7 +314,6 @@ export default function HistoryPage() {
                           )}
                         </td>
 
-                        {/* Foto Thumbnail & Lightbox Trigger */}
                         <td className="py-2.5 px-3 text-center">
                           {row.image_url ? (
                             <button
