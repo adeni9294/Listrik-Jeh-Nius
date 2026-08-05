@@ -40,14 +40,14 @@ interface MeterWithReading {
   meter_number: string;
   power_va: number;
   lastReading: number | null;
-  hourlyRate: number;      // kWh / jam
-  dailyProjection: number; // kWh / hari
-  weeklyProjection: number;// kWh / minggu
-  monthlyProjection: number;// kWh / bulan
+  hourlyRate: number;
+  dailyProjection: number;
+  weeklyProjection: number;
+  monthlyProjection: number;
   lastScanIntervalHours: number;
   confidence: number;
-  todayScanCount: number;  // Jumlah pindaian khusus HARI INI
-  todaySessions: TodayScanSession[]; // Array perbandingan pindaian hari ini
+  todayScanCount: number;
+  todaySessions: TodayScanSession[];
 }
 
 export default function DashboardPage() {
@@ -78,7 +78,6 @@ export default function DashboardPage() {
       setMetersData([]);
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchDashboardData = async (roleParam?: string, storeIdParam?: string | null) => {
@@ -122,7 +121,6 @@ export default function DashboardPage() {
       startOfToday.setHours(0, 0, 0, 0);
 
       for (const m of meters) {
-        // Ambil data pindaian terbaru (sampai 3 pindaian terakhir untuk kestabilan)
         const { data: readings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
@@ -130,17 +128,15 @@ export default function DashboardPage() {
           .order('created_at', { ascending: false })
           .limit(3);
 
-        // Ambil seluruh pindaian HARI INI (untuk perbandingan Sesi 1, 2, 3)
         const { data: todayReadings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, created_at')
           .eq('meter_id', m.id)
           .gte('created_at', startOfToday.toISOString())
-          .order('created_at', { ascending: true }); // Diurutkan dari tertua ke terbaru hari ini
+          .order('created_at', { ascending: true });
 
         const scanCountToday = todayReadings?.length || 0;
 
-        // Susun Perbandingan Sesi Hari Ini
         const formattedSessions: TodayScanSession[] = [];
         if (todayReadings && todayReadings.length > 0) {
           todayReadings.forEach((r, idx) => {
@@ -224,7 +220,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Realtime Subscription
   useEffect(() => {
     if (!isLoggedIn) return;
 
@@ -262,7 +257,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Metrik Dashboard (Global vs Single)
   const isAllMode = selectedMeterId === 'all';
   const filteredMeters = isAllMode
     ? metersData
@@ -304,11 +298,12 @@ export default function DashboardPage() {
   const currentScanMode = getScanModeText(displayTodayScans);
 
   return (
-    <div className="p-4 space-y-4 pb-24 max-w-lg mx-auto">
+    /* Mengubah max-w-lg menjadi max-w-6xl agar lebar dan pas di layar Desktop */
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
       {/* Header Info */}
       <div className="flex justify-between items-center gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-1.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-1.5">
             Halo, {userRole === 'admin' ? 'Owner / Pengawas' : 'Pengelola Toko'} 👋
             {isLoggedIn && userRole === 'admin' && (
               <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold border border-amber-300 flex items-center gap-1">
@@ -316,37 +311,37 @@ export default function DashboardPage() {
               </span>
             )}
           </h1>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs sm:text-sm text-slate-500">
             Monitoring: <span className="font-semibold text-teal-700">{isLoggedIn ? `${metersData.length} Toko Terdaftar` : 'Silakan Masuk'}</span>
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           {isLoggedIn ? (
             <Button
               onClick={handleLogout}
               size="sm"
               variant="outline"
-              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-2.5 h-8"
+              className="bg-red-50 border-red-200 text-red-700 hover:bg-red-100 text-xs font-semibold gap-1 px-3 h-9"
             >
-              <LogOut className="w-3.5 h-3.5" /> Keluar
+              <LogOut className="w-4 h-4" /> Keluar
             </Button>
           ) : (
             <Link href="/login">
               <Button
                 size="sm"
                 variant="outline"
-                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-2.5 h-8"
+                className="bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold gap-1 px-3 h-9"
               >
-                <LogIn className="w-3.5 h-3.5" /> Masuk
+                <LogIn className="w-4 h-4" /> Masuk
               </Button>
             </Link>
           )}
 
           {isLoggedIn && (
             <Link href="/toko/tambah">
-              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold gap-1 px-2.5 h-8">
-                <Plus className="w-3.5 h-3.5" /> Toko
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold gap-1 px-3 h-9">
+                <Plus className="w-4 h-4" /> Tambah Toko
               </Button>
             </Link>
           )}
@@ -354,191 +349,184 @@ export default function DashboardPage() {
       </div>
 
       {loading ? (
-        <div className="flex justify-center items-center py-12 text-slate-400 gap-2">
-          <RefreshCw className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Memuat data energi...</span>
+        <div className="flex justify-center items-center py-20 text-slate-400 gap-2">
+          <RefreshCw className="w-6 h-6 animate-spin" />
+          <span className="text-base font-medium">Memuat data energi...</span>
         </div>
       ) : !isLoggedIn ? (
         <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
-          <CardContent className="p-8 text-center space-y-4">
-            <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
-              <Lock className="w-6 h-6" />
+          <CardContent className="p-12 text-center space-y-4">
+            <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
+              <Lock className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-800 text-sm">Akses Dashboard Terkunci</h3>
-              <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+              <h3 className="font-bold text-slate-800 text-base">Akses Dashboard Terkunci</h3>
+              <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
                 Silakan masuk menggunakan Kode Toko / ID PLN Anda untuk melihat ringkasan konsumsi listrik toko Anda.
               </p>
             </div>
             <Link href="/login" className="inline-block">
-              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-6 py-2">
+              <Button size="sm" className="bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs px-8 py-2.5">
                 <LogIn className="w-4 h-4 mr-1.5" /> Masuk ke Toko
               </Button>
             </Link>
           </CardContent>
         </Card>
       ) : (
-        <>
-          {/* Card Score & Status Scan */}
-          <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
-            <CardContent className="p-5">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="text-[10px] font-bold tracking-widest text-emerald-400 uppercase">
-                    Energy Intelligence Score {isAllMode ? '(Global)' : ''}
-                  </span>
-                  <div className="text-4xl font-extrabold mt-1">
-                    {currentDisplayScore}<span className="text-lg font-normal text-emerald-300">/100</span>
+        /* LAYOUT DESKTOP: GRID 2 KOLOM PADA DESKTOP */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* KOLOM KIRI (2 SPAN PADA DESKTOP) */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* Card Score & Status Scan */}
+            <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
+              <CardContent className="p-6">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-xs font-bold tracking-widest text-emerald-400 uppercase">
+                      Energy Intelligence Score {isAllMode ? '(Global)' : ''}
+                    </span>
+                    <div className="text-5xl font-extrabold mt-2">
+                      {currentDisplayScore}<span className="text-xl font-normal text-emerald-300">/100</span>
+                    </div>
+                    <span className={`inline-block mt-3 px-3 py-1 text-xs font-semibold rounded-md border ${
+                      currentDisplayScore >= 80 
+                        ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/20'
+                        : currentDisplayScore >= 60 
+                        ? 'bg-amber-500/20 text-amber-200 border-amber-400/20'
+                        : 'bg-rose-500/20 text-rose-200 border-rose-400/20'
+                    }`}>
+                      {currentDisplayScore >= 80 ? 'Excellent Efficiency' : currentDisplayScore >= 60 ? 'Need Attention' : 'Critical Status'}
+                    </span>
                   </div>
-                  <span className={`inline-block mt-2 px-2.5 py-0.5 text-xs font-semibold rounded-md border ${
-                    currentDisplayScore >= 80 
-                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/20'
-                      : currentDisplayScore >= 60 
-                      ? 'bg-amber-500/20 text-amber-200 border-amber-400/20'
-                      : 'bg-rose-500/20 text-rose-200 border-rose-400/20'
-                  }`}>
-                    {currentDisplayScore >= 80 ? 'Excellent Efficiency' : currentDisplayScore >= 60 ? 'Need Attention' : 'Critical Status'}
-                  </span>
-                </div>
 
-                <div className="text-right bg-teal-950/50 p-2.5 rounded-xl border border-teal-700/40">
-                  <span className="text-[9px] font-bold tracking-widest text-teal-300 uppercase block">
-                    Status Scan Hari Ini
-                  </span>
-                  <div className={`text-xs font-extrabold mt-1 ${currentScanMode.color}`}>
-                    {currentScanMode.label}
+                  <div className="text-right bg-teal-950/50 p-3.5 rounded-xl border border-teal-700/40">
+                    <span className="text-[10px] font-bold tracking-widest text-teal-300 uppercase block">
+                      Status Scan Hari Ini
+                    </span>
+                    <div className={`text-sm font-extrabold mt-1 ${currentScanMode.color}`}>
+                      {currentScanMode.label}
+                    </div>
+                    <span className="text-[10px] text-teal-200 block mt-1">
+                      {displayTodayScans === 0 ? 'Belum scan hari ini' : `${displayTodayScans}x Pindaian Sukses`}
+                    </span>
                   </div>
-                  <span className="text-[9px] text-teal-200 block mt-0.5">
-                    {displayTodayScans === 0 ? 'Belum scan hari ini' : `${displayTodayScans}x Pindaian Sukses`}
-                  </span>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Stats Grid */}
-          <div className="grid grid-cols-2 gap-3">
-            <Card className="bg-slate-50 border-slate-200">
-              <CardContent className="p-4">
-                <div className="flex items-center space-x-2 text-amber-600 mb-1">
-                  <Zap className="w-4 h-4" />
-                  <span className="text-xs font-semibold">{isAllMode ? 'Total Sisa Token' : 'Sisa Token Toko'}</span>
-                </div>
-                <div className="text-xl font-bold text-slate-800">
-                  {displayTokenKwh.toFixed(1)} <span className="text-xs font-normal">kWh</span>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  ~ Rp {Math.round(displayEstimatedRupiah).toLocaleString('id-ID')}
-                </p>
               </CardContent>
             </Card>
 
-            <Card className={`border-slate-200 ${displayDaysLeft <= 2 ? 'bg-rose-50/60 border-rose-200' : 'bg-slate-50'}`}>
-              <CardContent className="p-4">
-                <div className={`flex items-center space-x-2 mb-1 ${displayDaysLeft <= 2 ? 'text-rose-600' : 'text-teal-600'}`}>
-                  {displayDaysLeft <= 2 ? <AlertTriangle className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                  <span className="text-xs font-semibold">Estimasi Habis</span>
-                </div>
-                <div className={`text-xl font-bold ${displayDaysLeft <= 2 ? 'text-rose-700' : 'text-slate-800'}`}>
-                  {displayDaysLeft} <span className="text-xs font-normal">Hari Lagi</span>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Laju: {displayHourlyRate.toFixed(2)} kWh/jam
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <Card className="bg-slate-50 border-slate-200">
+                <CardContent className="p-5">
+                  <div className="flex items-center space-x-2 text-amber-600 mb-1">
+                    <Zap className="w-5 h-5" />
+                    <span className="text-xs font-bold uppercase">{isAllMode ? 'Total Sisa Token' : 'Sisa Token Toko'}</span>
+                  </div>
+                  <div className="text-2xl font-extrabold text-slate-800">
+                    {displayTokenKwh.toFixed(1)} <span className="text-sm font-normal">kWh</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    ~ Rp {Math.round(displayEstimatedRupiah).toLocaleString('id-ID')}
+                  </p>
+                </CardContent>
+              </Card>
 
-          {/* Selector Toko */}
-          {metersData.length > 0 && (
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                <Store className="w-4 h-4 text-teal-600" /> Filter Toko:
-              </span>
-              <select
-                value={selectedMeterId}
-                onChange={(e) => setSelectedMeterId(e.target.value)}
-                className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm"
-              >
-                {userRole === 'admin' && (
-                  <option value="all">Semua Toko ({metersData.length})</option>
-                )}
-                {metersData.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.store_name}
-                  </option>
-                ))}
-              </select>
+              <Card className={`border-slate-200 ${displayDaysLeft <= 2 ? 'bg-rose-50/60 border-rose-200' : 'bg-slate-50'}`}>
+                <CardContent className="p-5">
+                  <div className={`flex items-center space-x-2 mb-1 ${displayDaysLeft <= 2 ? 'text-rose-600' : 'text-teal-600'}`}>
+                    {displayDaysLeft <= 2 ? <AlertTriangle className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+                    <span className="text-xs font-bold uppercase">Estimasi Habis</span>
+                  </div>
+                  <div className={`text-2xl font-extrabold ${displayDaysLeft <= 2 ? 'text-rose-700' : 'text-slate-800'}`}>
+                    {displayDaysLeft} <span className="text-sm font-normal">Hari Lagi</span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Laju: {displayHourlyRate.toFixed(2)} kWh/jam
+                  </p>
+                </CardContent>
+              </Card>
             </div>
-          )}
 
-          {/* Breakdown Toko */}
-          {filteredMeters.length === 0 ? (
-            <Card className="border-dashed border-slate-300 bg-slate-50">
-              <CardContent className="p-6 text-center space-y-3">
-                <p className="text-xs text-slate-500">Belum ada toko yang didaftarkan.</p>
-                <Link href="/toko/tambah">
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs">
-                    <Plus className="w-4 h-4 mr-1" /> Daftarkan Toko Pertama
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
+            {/* Selector Toko */}
+            {metersData.length > 0 && (
+              <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Store className="w-4 h-4 text-teal-600" /> Filter Toko Terpilih:
+                </span>
+                <select
+                  value={selectedMeterId}
+                  onChange={(e) => setSelectedMeterId(e.target.value)}
+                  className="text-xs bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm"
+                >
+                  {userRole === 'admin' && (
+                    <option value="all">Semua Toko ({metersData.length})</option>
+                  )}
+                  {metersData.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.store_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Breakdown Toko */}
+            <div className="space-y-4">
               {filteredMeters.map((m) => {
                 const storeTariff = getTariffRate(m.power_va);
                 const storeEstimatedRupiah = (m.lastReading ?? 0) * storeTariff;
 
                 return (
-                  <Card key={m.id} className="border-slate-200 hover:border-teal-300 transition">
-                    <CardContent className="p-4 space-y-3">
-                      <div className="flex justify-between items-start border-b pb-2">
+                  <Card key={m.id} className="border-slate-200 hover:border-teal-300 transition shadow-sm">
+                    <CardContent className="p-5 space-y-4">
+                      <div className="flex justify-between items-start border-b pb-3">
                         <div>
-                          <h3 className="font-bold text-slate-800 text-sm">{m.store_name}</h3>
-                          <p className="text-[11px] text-slate-500">
-                            PLN ID: <span className="font-mono text-slate-700">{m.meter_number}</span> • {m.power_va} VA
+                          <h3 className="font-bold text-slate-800 text-base">{m.store_name}</h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            PLN ID: <span className="font-mono text-slate-700 font-semibold">{m.meter_number}</span> • {m.power_va} VA
                           </p>
                         </div>
-                        <span className="text-[10px] bg-teal-50 text-teal-800 px-2 py-0.5 rounded-full font-bold border border-teal-200">
+                        <span className="text-xs bg-teal-50 text-teal-800 px-2.5 py-1 rounded-full font-bold border border-teal-200">
                           Aktif
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="bg-slate-50 p-2.5 rounded-xl">
-                          <span className="text-slate-500 block text-[10px]">Sisa Meteran</span>
-                          <span className="font-extrabold text-slate-800 text-sm">
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="bg-slate-50 p-3 rounded-xl">
+                          <span className="text-slate-500 block text-xs">Sisa Meteran</span>
+                          <span className="font-extrabold text-slate-800 text-base">
                             {m.lastReading !== null ? `${m.lastReading.toFixed(1)} kWh` : 'Belum Scan'}
                           </span>
                           {m.lastReading !== null && (
-                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                            <span className="block text-xs text-slate-400 mt-0.5">
                               ~ Rp {Math.round(storeEstimatedRupiah).toLocaleString('id-ID')}
                             </span>
                           )}
                         </div>
-                        <div className="bg-teal-50 p-2.5 rounded-xl">
-                          <span className="text-teal-700 block text-[10px] flex items-center gap-1">
-                            <Clock className="w-3 h-3" /> Pemakaian Rata-Rata
+                        <div className="bg-teal-50 p-3 rounded-xl">
+                          <span className="text-teal-700 block text-xs flex items-center gap-1 font-semibold">
+                            <Clock className="w-3.5 h-3.5" /> Pemakaian Rata-Rata
                           </span>
-                          <span className="font-extrabold text-teal-900 text-sm">
+                          <span className="font-extrabold text-teal-900 text-base">
                             {m.hourlyRate.toFixed(2)} kWh/jam
                           </span>
                         </div>
                       </div>
 
-                      <div className="bg-slate-100/70 p-2.5 rounded-xl grid grid-cols-3 gap-1 text-center text-[11px]">
+                      <div className="bg-slate-100/70 p-3 rounded-xl grid grid-cols-3 gap-2 text-center text-xs">
                         <div>
-                          <span className="text-slate-500 block text-[9px]">Sehari (24j)</span>
-                          <span className="font-bold text-slate-700">{m.dailyProjection.toFixed(1)} kWh</span>
+                          <span className="text-slate-500 block text-[10px] uppercase font-bold">Sehari (24j)</span>
+                          <span className="font-extrabold text-slate-800">{m.dailyProjection.toFixed(1)} kWh</span>
                         </div>
                         <div className="border-x border-slate-200">
-                          <span className="text-slate-500 block text-[9px]">Seminggu</span>
-                          <span className="font-bold text-slate-700">{m.weeklyProjection.toFixed(1)} kWh</span>
+                          <span className="text-slate-500 block text-[9px] uppercase font-bold">Seminggu</span>
+                          <span className="font-extrabold text-slate-800">{m.weeklyProjection.toFixed(1)} kWh</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block text-[9px]">Sebulan (30h)</span>
-                          <span className="font-bold text-slate-700">{m.monthlyProjection.toFixed(1)} kWh</span>
+                          <span className="text-slate-500 block text-[9px] uppercase font-bold">Sebulan (30h)</span>
+                          <span className="font-extrabold text-slate-800">{m.monthlyProjection.toFixed(1)} kWh</span>
                         </div>
                       </div>
                     </CardContent>
@@ -546,85 +534,90 @@ export default function DashboardPage() {
                 );
               })}
             </div>
-          )}
+          </div>
 
-          {/* PERBANDINGAN PINDAIAN 1, 2, 3 HARI INI */}
-          {filteredMeters.map((m) => (
-            <Card key={`sessions-${m.id}`} className="border-teal-200 bg-teal-50/30">
-              <CardHeader className="pb-2 pt-3 px-4">
-                <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                  <span>📊 Breakdown Pindaian Hari Ini ({m.store_name})</span>
-                  <span className="text-[10px] text-teal-700 font-normal">
-                    {m.todaySessions.length}x Pindaian
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-3 space-y-2">
-                {m.todaySessions.length === 0 ? (
-                  <p className="text-[11px] text-slate-400 italic">Belum ada pindaian hari ini.</p>
-                ) : (
-                  m.todaySessions.map((s, idx) => (
-                    <div
-                      key={s.id}
-                      className="bg-white p-2.5 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        {idx === 0 ? (
-                          <Sun className="w-4 h-4 text-amber-500" />
-                        ) : idx === 1 ? (
-                          <Sunset className="w-4 h-4 text-orange-500" />
-                        ) : (
-                          <Moon className="w-4 h-4 text-indigo-500" />
-                        )}
-                        <div>
-                          <span className="font-bold text-slate-800 block text-[11px]">{s.sessionName}</span>
-                          <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+          {/* KOLOM KANAN (DESKTOP SIDEBAR 1 SPAN) */}
+          <div className="space-y-6">
+            
+            {/* PERBANDINGAN PINDAIAN HARI INI */}
+            {filteredMeters.map((m) => (
+              <Card key={`sessions-${m.id}`} className="border-teal-200 bg-teal-50/30 shadow-sm">
+                <CardHeader className="pb-2 pt-4 px-5">
+                  <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                    <span>📊 Pindaian Sesi Hari Ini ({m.store_name})</span>
+                    <span className="text-[11px] text-teal-700 font-normal">
+                      {m.todaySessions.length}x Pindaian
+                    </span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-5 pb-4 space-y-2.5">
+                  {m.todaySessions.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
+                  ) : (
+                    m.todaySessions.map((s, idx) => (
+                      <div
+                        key={s.id}
+                        className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          {idx === 0 ? (
+                            <Sun className="w-4 h-4 text-amber-500" />
+                          ) : idx === 1 ? (
+                            <Sunset className="w-4 h-4 text-orange-500" />
+                          ) : (
+                            <Moon className="w-4 h-4 text-indigo-500" />
+                          )}
+                          <div>
+                            <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
+                            <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                          {s.consumptionFromPrev !== null && (
+                            <span className="text-[10px] text-rose-600 font-bold block">
+                              Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                            </span>
+                          )}
                         </div>
                       </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            ))}
 
-                      <div className="text-right">
-                        <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
-                        {s.consumptionFromPrev !== null && (
-                          <span className="text-[10px] text-rose-600 font-bold block">
-                            Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
+            {/* AI Energy Insight */}
+            <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
+              <CardHeader className="p-5 pb-2 flex flex-row items-center space-x-2">
+                <Cpu className="w-5 h-5 text-teal-700" />
+                <CardTitle className="text-sm font-bold text-teal-900">AI Energy Insight</CardTitle>
+              </CardHeader>
+              <CardContent className="p-5 pt-0 text-xs text-slate-700 space-y-3">
+                <p className="leading-relaxed">
+                  Rata-rata konsumsi listrik {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} saat ini adalah{' '}
+                  <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (sekitar{' '}
+                  <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
+                </p>
+                <div className="p-3 bg-white rounded-xl border border-teal-100 text-xs text-teal-800 leading-relaxed">
+                  💡 <strong>Rekomendasi :</strong> Pastikan pindaian dilakukan minimal 3x sehari (pagi, siang & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang presisi.
+                </div>
               </CardContent>
             </Card>
-          ))}
 
-          {/* AI Energy Insight */}
-          <Card className="border-teal-200 bg-teal-50/50">
-            <CardHeader className="p-4 pb-2 flex flex-row items-center space-x-2">
-              <Cpu className="w-5 h-5 text-teal-700" />
-              <CardTitle className="text-sm font-bold text-teal-900">AI Energy Insight</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0 text-xs text-slate-700 space-y-2">
-              <p>
-                Rata-rata konsumsi listrik {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} saat ini adalah{' '}
-                <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (sekitar{' '}
-                <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
-              </p>
-              <div className="p-2 bg-white rounded border border-teal-100 text-[11px] text-teal-800">
-                💡 <strong>Rekomendasi :</strong> Pastikan pindaian dilakukan minimal 3x sehari (pagi, siang & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang presisi.
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Action Button Scan */}
-          <div className="pt-2">
-            <Link href="/scan">
-              <Button className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-6 rounded-xl shadow-lg flex items-center justify-center space-x-2">
-                <Camera className="w-5 h-5" />
-                <span>Pindai Meter Listrik Sekarang</span>
-              </Button>
-            </Link>
+            {/* Action Button Scan */}
+            <div>
+              <Link href="/scan">
+                <Button className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-6 rounded-xl shadow-lg flex items-center justify-center space-x-2 text-sm">
+                  <Camera className="w-5 h-5" />
+                  <span>Pindai Meter Listrik Sekarang</span>
+                </Button>
+              </Link>
+            </div>
           </div>
-        </>
+
+        </div>
       )}
     </div>
   );
