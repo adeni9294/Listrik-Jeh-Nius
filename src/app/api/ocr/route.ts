@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     // Inisialisasi SDK Gemini
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       generationConfig: {
         responseMimeType: 'application/json',
       },
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     };
 
     const result = await model.generateContent([prompt, imagePart]);
-    const responseText = result.response.text();
+    let responseText = result.response.text();
 
     if (!responseText) {
       return NextResponse.json(
@@ -73,6 +73,9 @@ export async function POST(req: NextRequest) {
         { status: 502 }
       );
     }
+
+    // Pembersihan Markdown Code Block jika dikembalikan oleh model
+    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
 
     // Parse JSON
     let parsedData: any;
