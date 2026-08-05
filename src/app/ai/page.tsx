@@ -16,6 +16,9 @@ import {
   LogOut,
   LogIn,
   Lock,
+  Sun,
+  Sunset,
+  Moon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -26,6 +29,14 @@ interface Meter {
   store_name: string;
   meter_number: string;
   power_va: number;
+}
+
+interface TodayScanSession {
+  id: string;
+  time: string;
+  kwh: number;
+  consumptionFromPrev: number | null;
+  sessionName: string;
 }
 
 export default function AiPage() {
@@ -45,6 +56,7 @@ export default function AiPage() {
   const [daysRemaining, setDaysRemaining] = useState<number>(0);
   const [activeTariff, setActiveTariff] = useState<number>(1444.7);
   const [activePowerVa, setActivePowerVa] = useState<number>(1300);
+  const [todaySessions, setTodaySessions] = useState<TodayScanSession[]>([]);
 
   // Status AI Health
   const [healthStatus, setHealthStatus] = useState<'normal' | 'warning' | 'critical'>('normal');
@@ -58,12 +70,12 @@ export default function AiPage() {
   const [messages, setMessages] = useState<{ sender: 'ai' | 'user'; text: string }[]>([
     {
       sender: 'ai',
-      text: 'Halo! Saya Asisten AI Kelistrikan Toko. Ada yang ingin Anda tanyakan seputar estimasi Watt alat, batas daya PLN, cara hemat listrik, atau kebocoran arus?',
+      text: 'Halo! Saya Asisten AI Kelistrikan Toko. Ada yang ingin Anda tanyakan seputar estimasi Watt alat, lonjakan per pindaian hari ini, cara hemat listrik, atau kebocoran arus?',
     },
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
 
-  // Inisialisasi state awal dari localStorage secara aman di client-side
+  // Inisialisasi state awal dari localStorage
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
     const storedRole = localStorage.getItem('user_role');
@@ -106,7 +118,7 @@ export default function AiPage() {
       let currentMeters = meters;
       if (currentMeters.length === 0) {
         let query = supabase.from('meters').select('id, store_name, meter_number, power_va');
-        
+
         if (currentRole !== 'admin' && currentStoreId) {
           query = query.eq('id', currentStoreId);
         }
@@ -140,25 +152,64 @@ export default function AiPage() {
       const currentTariffRate = getTariffRate(powerVa);
       setActiveTariff(currentTariffRate);
 
+      // 1. Ambil pindaian hingga 3 data terakhir untuk kalkulasi laju presisi
       const { data: readings } = await supabase
         .from('meter_readings')
         .select('kwh, meter_value, created_at')
         .eq('meter_id', targetMeterId)
         .order('created_at', { ascending: false })
-        .limit(2);
+        .limit(3);
+
+      // 2. Ambil perbandingan pindaian HARI INI
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const { data: todayReadings } = await supabase
+        .from('meter_readings')
+        .select('id, kwh, meter_value, created_at')
+        .eq('meter_id', targetMeterId)
+        .gte('created_at', startOfToday.toISOString())
+        .order('created_at', { ascending: true });
+
+      const formattedSessions: TodayScanSession[] = [];
+      if (todayReadings && todayReadings.length > 0) {
+        todayReadings.forEach((r, idx) => {
+          const val = Number(r.meter_value ?? r.kwh ?? 0);
+          const timeStr = new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
+          let consumed: number | null = null;
+          if (idx > 0) {
+            const prevVal = Number(todayReadings[idx - 1].meter_value ?? todayReadings[idx - 1].kwh ?? 0);
+            if (prevVal >= val) {
+              consumed = prevVal - val;
+            }
+          }
+
+          const sessionLabel = idx === 0 ? 'Pindaian 1 (Pagi/Buka)' : idx === 1 ? 'Pindaian 2 (Siang)' : `Pindaian ${idx + 1} (Malam/Tutup)`;
+
+          formattedSessions.push({
+            id: r.id,
+            time: timeStr,
+            kwh: val,
+            consumptionFromPrev: consumed,
+            sessionName: sessionLabel,
+          });
+        });
+      }
+      setTodaySessions(formattedSessions);
 
       if (readings && readings.length > 0) {
         const latestReading = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
         setCurrentKwh(latestReading);
 
         if (readings.length >= 2) {
-          const prevReading = Number(readings[1].meter_value ?? readings[1].kwh ?? 0);
+          const oldestReading = Number(readings[readings.length - 1].meter_value ?? readings[readings.length - 1].kwh ?? 0);
           const t1 = new Date(readings[0].created_at).getTime();
-          const t2 = new Date(readings[1].created_at).getTime();
+          const t2 = new Date(readings[readings.length - 1].created_at).getTime();
           const diffHours = Math.max((t1 - t2) / (1000 * 60 * 60), 0.01);
 
-          if (prevReading >= latestReading) {
-            const consumed = prevReading - latestReading;
+          if (oldestReading >= latestReading && diffHours > 0) {
+            const consumed = oldestReading - latestReading;
             const ratePerHour = diffHours >= 0.25 ? consumed / diffHours : consumed;
             const calculatedDaily = ratePerHour * 24;
 
@@ -215,7 +266,7 @@ export default function AiPage() {
   const simulatedKwh = customAmount / (activeTariff || 1444.7);
   const simulatedDays = dailyKwh > 0 ? (simulatedKwh / dailyKwh).toFixed(1) : '0';
 
-  // --- ENGINE CHAT AI KELISTRIKAN PINTAR DENGAN KNOWLEDGE BASE DIPERLUAS ---
+  // --- ENGINE CHAT AI KELISTRIKAN PINTAR DENGAN ANALISIS SESSION SCAN ---
   const handleSendMessage = () => {
     if (!inputPrompt.trim()) return;
 
@@ -230,7 +281,7 @@ export default function AiPage() {
       const maxSafeWatts = Math.round(activePowerVa * 0.8);
       const storeName = meters.find((m) => m.id === selectedMeterId)?.store_name || 'Toko Ini';
 
-      // 1. REGEX ENGINE: Deteksi Input Watt, Jam, dan Jumlah Peralatan
+      // REGEX ENGINE: Deteksi Input Watt, Jam, dan Jumlah Peralatan
       const wattMatch = q.match(/(\d+)\s*(watt|w\b)/);
       const hourMatch = q.match(/(\d+)\s*(jam|hours|h\b)/);
       const qtyMatch = q.match(/(\d+)\s*(biji|buah|unit|pcs)/);
@@ -252,23 +303,33 @@ export default function AiPage() {
           `• **Total Beban:** ${detectedQty}x ${detectedWatt} W = **${totalWatt} Watt**\n` +
           `• **Konsumsi Alat:** ${dailyKwhCalc.toFixed(2)} kWh/hari (~Rp ${Math.round(dailyCost).toLocaleString('id-ID')}/hari)\n` +
           `• **Proyeksi Bulanan:** ${monthlyKwhCalc.toFixed(1)} kWh (~Rp ${Math.round(monthlyCost).toLocaleString('id-ID')}/bulan)\n` +
-          `• **Kontribusi di Toko:** Menyerap **~${sharePercent}%** dari total beban scan harian (${dailyKwh.toFixed(1)} kWh/hari).\n\n` +
+          `• **Kontribusi di Toko:** Menyerap **~${sharePercent}%** dari total beban harian (${dailyKwh.toFixed(1)} kWh/hari).\n\n` +
           `🔌 **Evaluasi Kapasitas PLN (${activePowerVa} VA):**\n` +
           `Batas aman penggunaan serentak toko Anda adalah **~${maxSafeWatts} Watt**.\n` +
           (totalWatt > maxSafeWatts 
             ? `⚠️ **Peringatan Overload:** Beban alat (${totalWatt} W) melampaui batas aman serentak MCB (${maxSafeWatts} W). Berisiko *trip/jepret* jika dinyalakan bersamaan!` 
             : `✅ **Aman:** Beban masih di bawah batas maksimal MCB.`);
       } 
-      // 2. KNOWLEDGE BASE BEBAN PENDINGIN (AC, Showcase, Kulkas, Freezer)
+      else if (q.includes('sesi') || q.includes('pindaian') || q.includes('pagi') || q.includes('siang') || q.includes('malam')) {
+        if (todaySessions.length === 0) {
+          response = `📊 **Analisis Pindaian Hari Ini:**\nBelum ada pindaian tersimpan hari ini. Lakukan scan pagi, siang, dan malam agar AI dapat memetakan jam lonjakan energi toko Anda.`;
+        } else {
+          let sessionText = todaySessions.map((s) => 
+            `• **${s.sessionName}** (${s.time}): ${s.kwh.toFixed(1)} kWh ${s.consumptionFromPrev !== null ? `➔ Terpakai: *${s.consumptionFromPrev.toFixed(1)} kWh*` : ''}`
+          ).join('\n');
+
+          response = `📊 **Breakdown Pindaian Hari Ini (${storeName}):**\n\n${sessionText}\n\n💡 **AI Insight:** Pastikan pemakaian di sesi siang terpantau ketat karena beban pendingin (AC & Showcase) mencapai puncaknya.`;
+        }
+      }
       else if (q.includes('showcase') || q.includes('kulkas') || q.includes('freezer')) {
         const estWatts = 250;
         const estKwhDay = (estWatts * 24) / 1000;
         const estCostDay = estKwhDay * activeTariff;
 
-        response = `🥤 **Analisis Beban Induktif Showcase / Kulkas:**\n\n` +
-          `• **Karakteristik:** Menggunakan kompresor. Saat pertama dinyalakan, lonjakan awal (*starting current*) bisa naik **2x-3x lipat** dari watt normal.\n` +
+        response = `🥤 **Analisis Beban Showcase / Kulkas:**\n\n` +
+          `• **Karakteristik:** Menggunakan kompresor. Lonjakan awal (*starting current*) bisa naik **2x-3x lipat** dari watt normal.\n` +
           `• **Estimasi Standar (~250W):** ${estKwhDay.toFixed(1)} kWh/hari (~Rp ${Math.round(estCostDay).toLocaleString('id-ID')}/hari).\n\n` +
-          `💡 **Tips Hemat:** Jarakkan belakang showcase minimal 15 cm dari dinding agar sirkulasi panas lancar, dan bersihkan debu kompresor sebulan sekali.`;
+          `💡 **Tips Hemat:** Beri jarak belakang showcase minimal 15 cm dari dinding agar sirkulasi panas kompresor lancar.`;
       } 
       else if (q.includes('ac') || q.includes('pendingin') || q.includes('suhu')) {
         const estWatts = 800;
@@ -278,62 +339,21 @@ export default function AiPage() {
 
         response = `❄️ **Analisis Beban AC Toko:**\n\n` +
           `AC menyerap sekitar 40-50% dari total listrik toko. AC 1 PK (~${estWatts} Watt) beroperasi ${estHours} jam menyerap **${estKwhDay.toFixed(1)} kWh/hari** (~Rp ${Math.round(estCostDay).toLocaleString('id-ID')}/hari).\n\n` +
-          `💡 **Tips Hemat:** Naikkan suhu remote dari 18°C ke **23°C–24°C**. Setiap kenaikan 1°C menghemat sekitar 6-10% konsumsi listrik AC.`;
+          `💡 **Tips Hemat:** Naikkan suhu remote dari 18°C ke **23°C–24°C** untuk menghemat hingga 15% energi.`;
       } 
-      // 3. KNOWLEDGE BASE PERALATAN DAPUR & PEMANAS (Dispenser, Microwave, Kompor Induksi, Water Heater)
-      else if (q.includes('dispenser') || q.includes('pemanas') || q.includes('air panas')) {
-        response = `☕ **Analisis Beban Dispenser / Water Heater:**\n\n` +
-          `• **Elemen Pemanas (Heater):** Menyerap daya tinggi (**350W – 500W**) setiap kali siklus memanaskan air.\n` +
-          `• **Estimasi Biaya:** Menyala 24 jam dengan siklus otomatis menyerap ~2.5 kWh/hari (~Rp ${Math.round(2.5 * activeTariff).toLocaleString('id-ID')}/hari).\n\n` +
-          `💡 **Tips Hemat:** Gunakan timer colokan agar fungsi *Hot* mati otomatis saat toko tutup (malam hari).`;
-      }
-      else if (q.includes('microwave') || q.includes('oven') || q.includes('kompor induksi')) {
-        response = `🍳 **Analisis Alat Dapur Daya Tinggi:**\n\n` +
-          `• Microwave/Oven: Menyerap **800W – 1200W**.\n` +
-          `• Kompor Induksi: Menyerap **1000W – 1500W**.\n\n` +
-          `⚠️ **Catatan MCB PLN (${activePowerVa} VA):** Alat pemanas dapur memiliki resistansi murni yang langsung menyerap watt penuh. Pastikan AC atau pemanas air dimatikan sementara saat menyalakan alat ini agar MCB tidak jepret.`;
-      }
-      // 4. KNOWLEDGE BASE PENERANGAN & ELEKTRONIK KASIR (Lampu, Neon Box, POS, Printer)
-      else if (q.includes('lampu') || q.includes('neon') || q.includes('sorot') || q.includes('terang')) {
-        response = `💡 **Analisis Penerangan Toko:**\n\n` +
-          `• **Lampu LED:** Sangat efisien (10-20 Watt per titik).\n` +
-          `• **Neon Box / Lampu Sorot Display:** Menyerap **100W – 300W** per set.\n\n` +
-          `💡 **Tips Hemat:** Pastikan lampu sorot luar dan neon box menggunakan *Timer Switch* agar otomatis mati pukul 22:00 / saat toko tutup.`;
-      }
-      else if (q.includes('kasir') || q.includes('komputer') || q.includes('pos') || q.includes('printer')) {
-        response = `🖥️ **Analisis Perangkat Kasir & POS:**\n\n` +
-          `• Set Komputer POS + Printer Thermal + EDC menyerap sekitar **120W – 200W**.\n` +
-          `• Relatif hemat (~1.5 kWh/hari untuk operasional 12 jam).\n\n` +
-          `💡 **Saran Keamanan:** Gunakan UPS mini agar komputer kasir tidak mendadak mati jika sisa token habis atau listrik padam.`;
-      }
-      // 5. KNOWLEDGE BASE ANOMALI, KEBOCORAN ARUS & JEPET MCB
       else if (q.includes('bocor') || q.includes('boros') || q.includes('lonjakan')) {
         response = `🔍 **Deteksi Kebocoran / Anomali Listrik Toko:**\n\n` +
-          `Jika pemakaian tiba-tiba melonjak tinggi tanpa penambahan alat baru, cek hal berikut:\n` +
-          `1. **Karet Pintu Showcase Renggang:** Penyebab utama kompresor berjalan 24 jam nonstop.\n` +
+          `Jika pemakaian tiba-tiba melonjak tinggi, cek hal berikut:\n` +
+          `1. **Karet Pintu Showcase Renggang:** Kompresor beroperasi 24 jam nonstop.\n` +
           `2. **Filter AC Kotor:** Memaksa kompresor bekerja ekstra keras.\n` +
           `3. **Stopkontak Longgar / Panas:** Indikasi adanya *Arus Bocor* ke grounding.\n\n` +
-          `*Rekomendasi:* Lakukan pindaian meteran 3x sehari di menu Scan untuk melacak jam terjadinya lonjakan.`;
+          `*Rekomendasi:* Lakukan pindaian meteran 3x sehari untuk melacak jam terjadinya lonjakan secara presisi.`;
       }
-      else if (q.includes('jepret') || q.includes('mcb') || q.includes('kapasitas') || q.includes('va')) {
-        response = `🔌 **Aturan Kapasitas MCB PLN (${activePowerVa} VA):**\n\n` +
-          `• **Kapasitas Nyata (Power Factor 0.8):** Mampu menampung beban serentak hingga **~${maxSafeWatts} Watt**.\n` +
-          `• **Penyebab Listrik Jepret:** Terjadi ketika total watt alat yang menyala bersamaan melampaui ${maxSafeWatts} Watt, atau terjadi lonjakan *starting current* kompresor AC/Showcase secara bersamaan.\n\n` +
-          `*Saran:* Nyalakan AC dan Showcase secara bertahap (jeda 2-3 menit) agar tidak bentrok lonjakan awal.`;
-      }
-      // 6. KNOWLEDGE BASE TARIF & TOKEN PLN
-      else if (q.includes('pln') || q.includes('token') || q.includes('tarif') || q.includes('alarm')) {
-        response = `ℹ️ **Ketentuan Token Listrik PLN:**\n\n` +
-          `• **Daya Toko:** ${activePowerVa} VA (Tarif: Rp ${activeTariff}/kWh)\n` +
-          `• **Satuan Layar Meteran:** Angka pada meteran digital adalah **Sisa kWh**, bukan Rupiah.\n` +
-          `• **Rekomendasi Beli Token:** Berdasarkan laju ${hourlyKwh.toFixed(2)} kWh/jam, disarankan isi token sebesar **Rp ${recCost.toLocaleString('id-ID')}** untuk mengamankan 14 hari ke depan.`;
-      }
-      // 7. DEFAULT FALLBACK
       else {
         response = `Saya adalah Asisten AI Kelistrikan Toko (${storeName} - ${activePowerVa} VA).\n\n` +
           `Anda bisa mengetik pertanyaan seperti:\n` +
+          `• *"Bagaimana hasil pindaian sesi hari ini?"*\n` +
           `• *"Showcase 300 watt 24 jam"* \n` +
-          `• *"Dispenser air panas boros tidak?"*\n` +
           `• *"Berapa watt aman untuk daya ${activePowerVa} VA?"*\n` +
           `• *"Penyebab listrik toko boros tiba-tiba?"*`;
       }
@@ -381,7 +401,6 @@ export default function AiPage() {
               onChange={(e) => setSelectedMeterId(e.target.value)}
               className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 focus:ring-2 focus:ring-teal-500 outline-none shadow-sm h-8"
             >
-              <option value="all">Semua Toko ({meters.length})</option>
               {meters.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.store_name}
@@ -398,7 +417,6 @@ export default function AiPage() {
           <span className="text-sm">Analisis AI sedang berjalan...</span>
         </div>
       ) : !isLoggedIn ? (
-        /* TAMPILAN TERKUNCI JIKA LOGOUT */
         <Card className="border-dashed border-slate-300 bg-slate-50/80 my-8">
           <CardContent className="p-8 text-center space-y-4">
             <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto">
@@ -418,7 +436,6 @@ export default function AiPage() {
           </CardContent>
         </Card>
       ) : (
-        /* TAMPILAN FITUR UTAMA JIKA LOGGED IN */
         <>
           {/* Status Kesehatan Energi AI */}
           <Card
@@ -453,6 +470,53 @@ export default function AiPage() {
                     : `Laju konsumsi terdeteksi ${hourlyKwh.toFixed(2)} kWh/jam (rata-rata ${dailyKwh.toFixed(1)} kWh/hari). Tidak terdeteksi adanya kebocoran arus mendadak.`}
                 </p>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* PERBANDINGAN PINDAIAN SESI HARI INI */}
+          <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
+            <CardHeader className="pb-2 pt-3 px-4">
+              <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
+                <span>📊 Log Pindaian Sesi Hari Ini</span>
+                <span className="text-[10px] text-teal-700 font-normal">
+                  {todaySessions.length}x Pindaian Sukses
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-3 space-y-2">
+              {todaySessions.length === 0 ? (
+                <p className="text-[11px] text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
+              ) : (
+                todaySessions.map((s, idx) => (
+                  <div
+                    key={s.id}
+                    className="bg-white p-2.5 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      {idx === 0 ? (
+                        <Sun className="w-4 h-4 text-amber-500" />
+                      ) : idx === 1 ? (
+                        <Sunset className="w-4 h-4 text-orange-500" />
+                      ) : (
+                        <Moon className="w-4 h-4 text-indigo-500" />
+                      )}
+                      <div>
+                        <span className="font-bold text-slate-800 block text-[11px]">{s.sessionName}</span>
+                        <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                      {s.consumptionFromPrev !== null && (
+                        <span className="text-[10px] text-rose-600 font-bold block">
+                          Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
 
@@ -563,7 +627,7 @@ export default function AiPage() {
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Tanya AI (contoh: 'Dispenser air panas boros tidak?')..."
+                  placeholder="Tanya AI (contoh: 'Bagaimana hasil pindaian sesi hari ini?')..."
                   value={inputPrompt}
                   onChange={(e) => setInputPrompt(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
