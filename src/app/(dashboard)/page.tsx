@@ -240,12 +240,20 @@ export default function DashboardPage() {
     };
   }, [supabase]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('active_store_id');
-    localStorage.removeItem('active_store_name');
-    localStorage.removeItem('active_meter_number');
-    localStorage.removeItem('user_role');
-    router.push('/login');
+  // Perbaikan fungsi Logout: Hapus seluruh cache & reload total halaman
+  const handleLogout = async () => {
+    try {
+      setActiveStoreId(null);
+      await supabase.auth.signOut();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/login';
+    }
   };
 
   const filteredMeters = selectedMeterId === 'all'
