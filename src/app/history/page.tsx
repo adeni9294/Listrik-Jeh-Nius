@@ -15,6 +15,7 @@ import {
   LogOut,
   LogIn,
   Lock,
+  Filter,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -41,7 +42,10 @@ export default function HistoryPage() {
   const [metersMap, setMetersMap] = useState<
     Record<string, { store_name: string; meter_number: string }>
   >({});
+  
+  // State Filters
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('7days'); // 'today' | '7days' | '30days' | 'all'
 
   // State untuk modal preview foto
   const [activePhoto, setActivePhoto] = useState<{
@@ -78,7 +82,7 @@ export default function HistoryPage() {
       initHistory();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMeterId]);
+  }, [selectedMeterId, dateFilter]);
 
   const initHistory = async (roleParam?: string | null, activeStoreIdParam?: string | null) => {
     setLoading(true);
@@ -115,18 +119,33 @@ export default function HistoryPage() {
       }
       setMetersMap(map);
 
-      // 2. Query data pembacaan meteran
+      // 2. Query data pembacaan meteran dengan Filter Tanggal & Limit Optimasi
       let query = supabase.from('meter_readings').select('*');
 
+      // Filter Berdasarkan Toko
       if (selectedMeterId !== 'all') {
         query = query.eq('meter_id', selectedMeterId);
       } else if (currentRole !== 'admin' && currentActiveStore) {
         query = query.eq('meter_id', currentActiveStore);
       }
 
-      let { data: readingsData, error } = await query.order('created_at', {
-        ascending: false,
-      });
+      // Filter Berdasarkan Tanggal (Mencegah Query Berat)
+      const now = new Date();
+      if (dateFilter === 'today') {
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        query = query.gte('created_at', startOfToday);
+      } else if (dateFilter === '7days') {
+        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        query = query.gte('created_at', sevenDaysAgo);
+      } else if (dateFilter === '30days') {
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        query = query.gte('created_at', thirtyDaysAgo);
+      }
+
+      // Limit Maksimal 100 baris agar ringan
+      let { data: readingsData, error } = await query
+        .order('created_at', { ascending: false })
+        .limit(100);
 
       // Fallback jika nama tabel di DB adalah 'readings'
       if (error || !readingsData) {
@@ -136,7 +155,21 @@ export default function HistoryPage() {
         } else if (currentRole !== 'admin' && currentActiveStore) {
           fallbackQuery = fallbackQuery.eq('meter_id', currentActiveStore);
         }
-        const fallbackRes = await fallbackQuery.order('created_at', { ascending: false });
+
+        if (dateFilter === 'today') {
+          const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+          fallbackQuery = fallbackQuery.gte('created_at', startOfToday);
+        } else if (dateFilter === '7days') {
+          const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+          fallbackQuery = fallbackQuery.gte('created_at', sevenDaysAgo);
+        } else if (dateFilter === '30days') {
+          const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+          fallbackQuery = fallbackQuery.gte('created_at', thirtyDaysAgo);
+        }
+
+        const fallbackRes = await fallbackQuery
+          .order('created_at', { ascending: false })
+          .limit(100);
         readingsData = fallbackRes.data || [];
       }
 
@@ -248,12 +281,33 @@ export default function HistoryPage() {
               </Button>
             </Link>
           )}
+        </div>
+      </div>
 
-          {isLoggedIn && meterOptions.length > 0 && userRole === 'admin' && (
+      {/* Baris Controls / Controls Bar */}
+      {isLoggedIn && (
+        <div className="flex items-center justify-between gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+          {/* Filter Tanggal */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <Filter className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="bg-white border border-slate-200 rounded-lg p-1.5 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 h-8"
+            >
+              <option value="today">Hari Ini</option>
+              <option value="7days">7 Hari Terakhir</option>
+              <option value="30days">30 Hari Terakhir</option>
+              <option value="all">Semua Tanggal</option>
+            </select>
+          </div>
+
+          {/* Filter Toko (Khusus Admin) */}
+          {userRole === 'admin' && meterOptions.length > 0 && (
             <select
               value={selectedMeterId}
               onChange={(e) => setSelectedMeterId(e.target.value)}
-              className="text-xs bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 outline-none h-8"
+              className="bg-white border border-slate-200 rounded-lg p-1.5 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 h-8 max-w-[140px] truncate"
             >
               <option value="all">Semua Toko ({meterOptions.length})</option>
               {meterOptions.map((m) => (
@@ -264,7 +318,7 @@ export default function HistoryPage() {
             </select>
           )}
         </div>
-      </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center items-center py-12 text-slate-400 gap-2">
@@ -309,7 +363,7 @@ export default function HistoryPage() {
                   {readings.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="py-8 text-center text-slate-400 italic">
-                        Belum ada data pindaian tersimpan di database.
+                        Belum ada data pindaian pada periode ini.
                       </td>
                     </tr>
                   ) : (
