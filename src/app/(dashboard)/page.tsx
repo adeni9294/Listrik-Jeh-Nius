@@ -42,13 +42,25 @@ interface MeterWithReading {
   actualDailyKwh: number;
   dailyProjection: number;
   weeklyProjection: number;
-  monthlyProjection: number;
-  monthlyProjection31: number;
+  monthlyProjectionNextMonth: number;
   lastScanIntervalHours: number;
   confidence: number;
   todayScanCount: number;
   todaySessions: TodayScanSession[];
 }
+
+// FUNGSI UTAMA: MENGAMBIL NAMA BULAN DEPAN & JUMLAH HARINYA SECARA OTOMATIS
+const getNextMonthInfo = () => {
+  const now = new Date();
+  // Tanggal 1 pada bulan berikutnya (otomatis menyesuaikan jika pergantian tahun Des -> Jan)
+  const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  
+  const monthName = nextMonthDate.toLocaleDateString('id-ID', { month: 'long' });
+  // Mengambil tanggal terakhir di bulan berikutnya untuk jumlah hari yang presisi (misal: 28, 30, atau 31)
+  const daysInNextMonth = new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0).getDate();
+
+  return { monthName, daysInNextMonth };
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -61,6 +73,8 @@ export default function DashboardPage() {
 
   const [metersData, setMetersData] = useState<MeterWithReading[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('all');
+
+  const { monthName: nextMonthName, daysInNextMonth: nextMonthDays } = getNextMonthInfo();
 
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
@@ -119,6 +133,8 @@ export default function DashboardPage() {
       const computedMeters: MeterWithReading[] = [];
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
+
+      const { daysInNextMonth } = getNextMonthInfo();
 
       for (const m of meters) {
         const { data: readings } = await supabase
@@ -215,11 +231,10 @@ export default function DashboardPage() {
           }
         }
 
-        // PROYEKSI SESUAI FORMULA EXCEL: LAJU PER JAM * 24 JAM
+        // PROYEKSI DINAMIS BERDASARKAN HARI BULAN DEPAN
         const dailyProj = hourlyRate > 0 ? hourlyRate * 24 : actualDailyKwh;
         const weeklyProj = dailyProj * 7;
-        const monthlyProj30 = dailyProj * 30;
-        const monthlyProj31 = dailyProj * 31;
+        const monthlyProjNextMonth = dailyProj * daysInNextMonth;
 
         const storePowerVa = m.power_va || 1300;
 
@@ -233,8 +248,7 @@ export default function DashboardPage() {
           actualDailyKwh,
           dailyProjection: dailyProj,
           weeklyProjection: weeklyProj,
-          monthlyProjection: monthlyProj30,
-          monthlyProjection31: monthlyProj31,
+          monthlyProjectionNextMonth: monthlyProjNextMonth,
           lastScanIntervalHours: intervalHours,
           confidence: avgMeterConfidence,
           todayScanCount: scanCountToday,
@@ -522,7 +536,7 @@ export default function DashboardPage() {
                         </span>
                       </div>
 
-                      {/* TAMPILAN SESUAI KONSEP EXCEL */}
+                      {/* TAMPILAN KONSUMSI REALTIME */}
                       <div className="grid grid-cols-3 gap-3 text-xs">
                         <div className="bg-slate-50 p-3 rounded-xl">
                           <span className="text-slate-500 block text-[11px] font-medium">Sisa Meteran</span>
@@ -554,10 +568,10 @@ export default function DashboardPage() {
                         </div>
                       </div>
 
-                      {/* BLOK DATA ESTIMASI PROYEKSI */}
+                      {/* BLOK DATA ESTIMASI PROYEKSI (DINAMIS BULAN DEPAN) */}
                       <div className="bg-slate-100/80 p-3.5 rounded-xl space-y-2">
-                        <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider">
-                          Data Estimasi
+                        <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider text-center sm:text-left">
+                          Data Estimasi Proyeksi
                         </span>
                         <div className="grid grid-cols-3 gap-2 text-center text-xs">
                           <div>
@@ -569,12 +583,11 @@ export default function DashboardPage() {
                             <span className="font-extrabold text-slate-800">{m.weeklyProjection.toFixed(2)} kWh</span>
                           </div>
                           <div>
-                            <span className="text-slate-500 block text-[10px] font-bold uppercase">Bulanan</span>
-                            <span className="font-extrabold text-slate-800 block">
-                              {m.monthlyProjection.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(30h)</span>
+                            <span className="text-slate-500 block text-[10px] font-bold uppercase capitalize">
+                              {nextMonthName || 'Bulanan'} ({nextMonthDays}h)
                             </span>
-                            <span className="font-extrabold text-slate-800 block mt-0.5">
-                              {m.monthlyProjection31.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(31h)</span>
+                            <span className="font-extrabold text-teal-800 block text-sm">
+                              {m.monthlyProjectionNextMonth.toFixed(2)} kWh
                             </span>
                           </div>
                         </div>
@@ -637,7 +650,7 @@ export default function DashboardPage() {
               </Card>
             ))}
 
-            {/* AI Energy Insight */}
+            {/* AI Energy Insight - DINAMIS DENGAN NAMA BULAN DEPAN */}
             <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
               <CardHeader className="p-5 pb-2 flex flex-row items-center space-x-2">
                 <Cpu className="w-5 h-5 text-teal-700" />
@@ -650,7 +663,7 @@ export default function DashboardPage() {
                   <strong>{filteredMeters.reduce((acc, curr) => acc + curr.actualDailyKwh, 0).toFixed(1)} kWh</strong>).
                 </p>
                 <div className="p-3 bg-white rounded-xl border border-teal-100 text-xs text-teal-800 leading-relaxed">
-                  💡 <strong>Rekomendasi Pembelian Token:</strong> Proyeksi bulanan toko disarankan menyiapkan sekitar <strong>{(displayHourlyRate * 24 * 30).toFixed(0)} kWh</strong> per bulan untuk menjaga kelancaran operasional toko.
+                  💡 <strong>Rekomendasi Token Bulan {nextMonthName || 'Depan'}:</strong> Proyeksi operasional disarankan menyiapkan sekitar <strong>{(displayHourlyRate * 24 * nextMonthDays).toFixed(0)} kWh</strong> untuk {nextMonthDays} hari ke depan.
                 </div>
               </CardContent>
             </Card>
