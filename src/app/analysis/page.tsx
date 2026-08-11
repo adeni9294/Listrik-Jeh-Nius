@@ -25,7 +25,6 @@ import {
   LogIn,
   Lock,
   BarChart3,
-  Calendar,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -643,7 +642,8 @@ export default function AnalysisPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            {/* MATRIKS KONSUMSI SELURUH TOKO (SISA TOKEN & PROYEKSI BIAYA) */}
+            
+            {/* MATRIKS KONSUMSI SELURUH TOKO (EST. BULAN DEPAN: KWH & RUPIAH) */}
             {storeAnalysisList.length > 0 && (
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
@@ -692,10 +692,17 @@ export default function AnalysisPage() {
                               {item.latestKwh.toFixed(1)}{' '}
                               <span className="text-[9px] font-normal text-slate-500">kWh</span>
                             </td>
-                            <td className="px-3 py-3 font-bold text-teal-800">
-                              Rp {Math.round(item.monthlyCost).toLocaleString('id-ID')}
+                            {/* EST. BULAN DEPAN: KWH & RUPIAH */}
+                            <td className="px-3 py-3">
+                              <span className="font-extrabold text-teal-900 block">
+                                {item.monthlyProjectionNextMonth.toFixed(1)} kWh
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono block">
+                                ~ Rp {Math.round(item.monthlyCost).toLocaleString('id-ID')}
+                              </span>
                             </td>
                             <td className="px-3 py-3">{getStatusBadge(item.daysRemaining)}</td>
+                            {/* TOMBOL AKSI FUNGSIONAL */}
                             <td className="px-3 py-3 text-right">
                               <Button
                                 size="sm"
