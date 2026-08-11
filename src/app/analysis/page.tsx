@@ -24,6 +24,8 @@ import {
   LogOut,
   LogIn,
   Lock,
+  BarChart3,
+  Calendar,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -44,6 +46,12 @@ interface TodayScanSession {
   sessionName: string;
 }
 
+interface DailyTrend {
+  dateLabel: string;
+  dayName: string;
+  totalKwh: number;
+}
+
 interface StoreAnalysisItem {
   id: string;
   store_name: string;
@@ -54,6 +62,7 @@ interface StoreAnalysisItem {
   daysRemaining: number;
   monthlyCost: number;
   todaySessions: TodayScanSession[];
+  weeklyTrend: DailyTrend[];
 }
 
 export default function AnalysisPage() {
@@ -94,7 +103,15 @@ export default function AnalysisPage() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMeterId]);
+  }, []);
+
+  const handleSelectStore = (storeId: string) => {
+    setSelectedMeterId(storeId);
+    const targetStore = storeAnalysisList.find((m) => m.id === storeId);
+    if (targetStore) {
+      applyMetrics(targetStore.hourlyRate, targetStore.monthlyCost);
+    }
+  };
 
   const fetchAnalysisData = async (roleParam?: string | null, activeStoreIdParam?: string | null) => {
     setLoading(true);
@@ -124,6 +141,9 @@ export default function AnalysisPage() {
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
       const detailedAnalysisList: StoreAnalysisItem[] = [];
       if (currentMeters.length > 0) {
         for (const m of currentMeters) {
@@ -134,16 +154,54 @@ export default function AnalysisPage() {
           const dailyKwh = rate * 24;
           const daysLeft = dailyKwh > 0 ? Math.floor(latestKwh / dailyKwh) : 99;
 
-          const { data: todayReadings } = await supabase
+          // Ambil pindaian 7 hari terakhir untuk tren
+          const { data: weekReadings } = await supabase
             .from('meter_readings')
-            .select('id, kwh, meter_value, created_at')
+            .select('kwh, meter_value, created_at')
             .eq('meter_id', m.id)
-            .gte('created_at', startOfToday.toISOString())
+            .gte('created_at', sevenDaysAgo.toISOString())
             .order('created_at', { ascending: true });
 
+          // Olah data tren 7 hari
+          const trendMap: Record<string, { total: number; count: number; dateObj: Date }> = {};
+          
+          for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateKey = d.toISOString().slice(0, 10);
+            trendMap[dateKey] = { total: 0, count: 0, dateObj: d };
+          }
+
+          if (weekReadings && weekReadings.length > 0) {
+            weekReadings.forEach((r, idx) => {
+              if (idx > 0) {
+                const prevVal = Number(weekReadings[idx - 1].meter_value ?? weekReadings[idx - 1].kwh ?? 0);
+                const currVal = Number(r.meter_value ?? r.kwh ?? 0);
+                const diff = prevVal >= currVal ? prevVal - currVal : 0;
+                
+                const dateKey = new Date(r.created_at).toISOString().slice(0, 10);
+                if (trendMap[dateKey]) {
+                  trendMap[dateKey].total += diff;
+                  trendMap[dateKey].count += 1;
+                }
+              }
+            });
+          }
+
+          const weeklyTrend: DailyTrend[] = Object.entries(trendMap).map(([key, value]) => ({
+            dateLabel: value.dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }),
+            dayName: value.dateObj.toLocaleDateString('id-ID', { weekday: 'short' }),
+            totalKwh: Number(value.total.toFixed(1)),
+          }));
+
+          // Sesi Hari Ini
           const formattedSessions: TodayScanSession[] = [];
-          if (todayReadings && todayReadings.length > 0) {
-            todayReadings.forEach((r, idx) => {
+          const todayReadings = (weekReadings || []).filter(
+            (r) => new Date(r.created_at) >= startOfToday
+          );
+
+          if (todayReadings.length > 0) {
+            todayReadings.forEach((r: any, idx: number) => {
               const val = Number(r.meter_value ?? r.kwh ?? 0);
               const timeStr = new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
@@ -155,15 +213,12 @@ export default function AnalysisPage() {
                 }
               }
 
-              // Label berbasis urutan fleksibel
-              const sessionLabel = `Pindaian #${idx + 1}`;
-
               formattedSessions.push({
-                id: r.id,
+                id: r.id || `session-${idx}`,
                 time: timeStr,
                 kwh: val,
                 consumptionFromPrev: consumed,
-                sessionName: sessionLabel,
+                sessionName: `Pindaian #${idx + 1}`,
               });
             });
           }
@@ -178,6 +233,7 @@ export default function AnalysisPage() {
             daysRemaining: daysLeft,
             monthlyCost: storeMonthlyCost,
             todaySessions: formattedSessions,
+            weeklyTrend,
           });
         }
       }
@@ -329,13 +385,7 @@ export default function AnalysisPage() {
   };
 
   const selectedStoreObj = storeAnalysisList.find((m) => m.id === selectedMeterId) || storeAnalysisList[0];
-
-  const deviceEstimates = [
-    { name: 'AC & Pendingin Toko', usageKwh: (dailyAvgKwh * 0.42).toFixed(1), percent: 42, color: 'bg-teal-600' },
-    { name: 'Kulkas / Showcase Minuman', usageKwh: (dailyAvgKwh * 0.28).toFixed(1), percent: 28, color: 'bg-emerald-600' },
-    { name: 'Penerangan & Lampu Toko', usageKwh: (dailyAvgKwh * 0.18).toFixed(1), percent: 18, color: 'bg-amber-500' },
-    { name: 'Komputer Kasir & Elektronik', usageKwh: (dailyAvgKwh * 0.12).toFixed(1), percent: 12, color: 'bg-indigo-500' },
-  ];
+  const maxTrendKwh = selectedStoreObj?.weeklyTrend ? Math.max(...selectedStoreObj.weeklyTrend.map((t) => t.totalKwh), 1) : 1;
 
   const potentialSavingsMonthly = monthlyEstCost * 0.15;
 
@@ -383,7 +433,7 @@ export default function AnalysisPage() {
           {isLoggedIn && meters.length > 0 && userRole === 'admin' && (
             <select
               value={selectedMeterId}
-              onChange={(e) => setSelectedMeterId(e.target.value)}
+              onChange={(e) => handleSelectStore(e.target.value)}
               className="text-xs bg-white border border-slate-200 rounded-lg p-2 font-semibold text-slate-800 shadow-sm focus:ring-2 focus:ring-teal-500 h-9 outline-none"
             >
               {meters.map((m) => (
@@ -479,7 +529,7 @@ export default function AnalysisPage() {
                                     ? 'bg-teal-700 hover:bg-teal-800 text-white'
                                     : 'text-teal-700 hover:text-teal-800 hover:bg-teal-50'
                                 }`}
-                                onClick={() => setSelectedMeterId(item.id)}
+                                onClick={() => handleSelectStore(item.id)}
                               >
                                 Detail <ArrowRight className="w-3 h-3 ml-1" />
                               </Button>
@@ -493,34 +543,49 @@ export default function AnalysisPage() {
               </Card>
             )}
 
-            {/* Smart Device Estimator Breakdown */}
+            {/* RIWAYAT TREN PEMAKAIAN 7 HARI TERAKHIR */}
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center justify-between text-slate-800">
                   <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-teal-700" />
-                    <span>Beban Operasional: <strong>{selectedStoreObj?.store_name}</strong></span>
+                    <BarChart3 className="w-4 h-4 text-teal-700" />
+                    <span>Tren Pemakaian 7 Hari Terakhir: <strong>{selectedStoreObj?.store_name}</strong></span>
                   </div>
-                  <span className="text-xs font-normal text-slate-500">Per Hari</span>
+                  <span className="text-xs font-normal text-slate-500 flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-slate-400" /> Total Konsumsi Harian
+                  </span>
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 pt-1">
-                {deviceEstimates.map((device, idx) => (
-                  <div key={idx} className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-semibold text-slate-700">
-                      <span>{device.name}</span>
-                      <span className="text-slate-900 font-bold">
-                        {device.usageKwh} kWh/hari ({device.percent}%)
-                      </span>
+              <CardContent className="pt-2">
+                {!selectedStoreObj?.weeklyTrend || selectedStoreObj.weeklyTrend.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian minggu ini.</p>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-7 gap-2 items-end h-32 pt-4 pb-2 border-b border-slate-100">
+                      {selectedStoreObj.weeklyTrend.map((day, idx) => {
+                        const barHeight = maxTrendKwh > 0 ? (day.totalKwh / maxTrendKwh) * 100 : 0;
+                        return (
+                          <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
+                            <span className="text-[10px] font-bold text-slate-700 mb-1">
+                              {day.totalKwh > 0 ? `${day.totalKwh}` : '-'}
+                            </span>
+                            <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[28px]">
+                              <div
+                                className="w-full bg-teal-600 group-hover:bg-teal-700 transition-all duration-500 rounded-t-md"
+                                style={{ height: `${Math.max(barHeight, 5)}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] font-semibold text-slate-500 mt-1.5">{day.dayName}</span>
+                            <span className="text-[8px] text-slate-400">{day.dateLabel}</span>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                      <div
-                        className={`${device.color} h-full rounded-full transition-all duration-500`}
-                        style={{ width: `${device.percent}%` }}
-                      />
-                    </div>
+                    <p className="text-[11px] text-slate-500 text-center font-medium pt-1">
+                      * Konsumsi dihitung berdasarkan selisih pindaian kWh pada hari tersebut.
+                    </p>
                   </div>
-                ))}
+                )}
               </CardContent>
             </Card>
 
