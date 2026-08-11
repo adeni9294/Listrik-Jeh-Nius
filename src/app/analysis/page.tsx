@@ -52,6 +52,11 @@ interface DailyTrend {
   totalKwh: number;
 }
 
+interface MonthlyTrend {
+  monthLabel: string;
+  totalKwh: number;
+}
+
 interface StoreAnalysisItem {
   id: string;
   store_name: string;
@@ -69,16 +74,15 @@ interface StoreAnalysisItem {
   spikePercent: number;
   todaySessions: TodayScanSession[];
   weeklyTrend: DailyTrend[];
+  monthlyTrend: MonthlyTrend[];
 }
 
 // FUNGSI UTAMA: MENGAMBIL NAMA BULAN DEPAN & JUMLAH HARINYA SECARA OTOMATIS
 const getNextMonthInfo = () => {
   const now = new Date();
-  // Tanggal 1 pada bulan berikutnya (otomatis menyesuaikan jika pergantian tahun Des -> Jan)
   const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   
   const monthName = nextMonthDate.toLocaleDateString('id-ID', { month: 'long' });
-  // Mengambil tanggal terakhir di bulan berikutnya untuk jumlah hari yang presisi (misal: 28, 30, atau 31)
   const daysInNextMonth = new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0).getDate();
 
   return { monthName, daysInNextMonth };
@@ -94,6 +98,9 @@ export default function AnalysisPage() {
   const [meters, setMeters] = useState<Meter[]>([]);
   const [storeAnalysisList, setStoreAnalysisList] = useState<StoreAnalysisItem[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('');
+
+  // STATE UNTUK PILIHAN GRAFIK (daily = 7 Hari, monthly = 6 Bulan)
+  const [chartMode, setChartMode] = useState<'daily' | 'monthly'>('daily');
 
   const [hourlyRate, setHourlyRate] = useState<number>(0);
   const [dailyEstKwh, setDailyEstKwh] = useState<number>(0);
@@ -169,6 +176,9 @@ export default function AnalysisPage() {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
       const { daysInNextMonth } = getNextMonthInfo();
 
       const detailedAnalysisList: StoreAnalysisItem[] = [];
@@ -177,6 +187,7 @@ export default function AnalysisPage() {
           const { rate, latestKwh, actualDailyKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
 
+          // 1. DATA 7 HARI TERAKHIR
           const { data: weekReadings } = await supabase
             .from('meter_readings')
             .select('kwh, meter_value, created_at')
@@ -185,7 +196,6 @@ export default function AnalysisPage() {
             .order('created_at', { ascending: true });
 
           const trendMap: Record<string, { total: number; count: number; dateObj: Date }> = {};
-          
           for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
@@ -215,6 +225,44 @@ export default function AnalysisPage() {
             totalKwh: Number(value.total.toFixed(1)),
           }));
 
+          // 2. DATA 6 BULAN TERAKHIR
+          const { data: monthReadings } = await supabase
+            .from('meter_readings')
+            .select('kwh, meter_value, created_at')
+            .eq('meter_id', m.id)
+            .gte('created_at', sixMonthsAgo.toISOString())
+            .order('created_at', { ascending: true });
+
+          const monthlyTrendMap: Record<string, { total: number; monthLabel: string }> = {};
+          for (let i = 5; i >= 0; i--) {
+            const d = new Date();
+            d.setMonth(d.getMonth() - i);
+            const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+            const monthLabel = d.toLocaleDateString('id-ID', { month: 'short' });
+            monthlyTrendMap[monthKey] = { total: 0, monthLabel };
+          }
+
+          if (monthReadings && monthReadings.length > 0) {
+            monthReadings.forEach((r, idx) => {
+              if (idx > 0) {
+                const prevVal = Number(monthReadings[idx - 1].meter_value ?? monthReadings[idx - 1].kwh ?? 0);
+                const currVal = Number(r.meter_value ?? r.kwh ?? 0);
+                const diff = prevVal >= currVal ? prevVal - currVal : 0;
+
+                const monthKey = new Date(r.created_at).toISOString().slice(0, 7);
+                if (monthlyTrendMap[monthKey]) {
+                  monthlyTrendMap[monthKey].total += diff;
+                }
+              }
+            });
+          }
+
+          const monthlyTrend: MonthlyTrend[] = Object.values(monthlyTrendMap).map((item) => ({
+            monthLabel: item.monthLabel,
+            totalKwh: Number(item.total.toFixed(1)),
+          }));
+
+          // BREAKDOWN PINDAIAN HARI INI
           const formattedSessions: TodayScanSession[] = [];
           const todayReadings = (weekReadings || []).filter(
             (r) => new Date(r.created_at) >= startOfToday
@@ -243,7 +291,6 @@ export default function AnalysisPage() {
             });
           }
 
-          // ESTIMASI DINAMIS BERDASARKAN HARI BULAN DEPAN
           const dailyProj = rate > 0 ? rate * 24 : actualDailyKwh;
           const weeklyProj = dailyProj * 7;
           const monthlyProjNextMonth = dailyProj * daysInNextMonth;
@@ -268,6 +315,7 @@ export default function AnalysisPage() {
             spikePercent: calculatedSpikePct,
             todaySessions: formattedSessions,
             weeklyTrend,
+            monthlyTrend,
           });
         }
       }
@@ -504,7 +552,10 @@ export default function AnalysisPage() {
   };
 
   const selectedStoreObj = storeAnalysisList.find((m) => m.id === selectedMeterId) || storeAnalysisList[0];
-  const maxTrendKwh = selectedStoreObj?.weeklyTrend ? Math.max(...selectedStoreObj.weeklyTrend.map((t) => t.totalKwh), 1) : 1;
+
+  // BATAS MAKSIMUM UNTUK SKALA GRAFIK
+  const maxWeeklyTrendKwh = selectedStoreObj?.weeklyTrend ? Math.max(...selectedStoreObj.weeklyTrend.map((t) => t.totalKwh), 1) : 1;
+  const maxMonthlyTrendKwh = selectedStoreObj?.monthlyTrend ? Math.max(...selectedStoreObj.monthlyTrend.map((t) => t.totalKwh), 1) : 1;
 
   const potentialSavingsMonthly = monthlyEstCost * 0.15;
 
@@ -592,6 +643,7 @@ export default function AnalysisPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
+            {/* MATRIKS KONSUMSI SELURUH TOKO (SISA TOKEN & PROYEKSI BIAYA) */}
             {storeAnalysisList.length > 0 && (
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
@@ -613,7 +665,8 @@ export default function AnalysisPage() {
                           <th className="px-3 py-2.5 rounded-l-md">Toko</th>
                           <th className="px-3 py-2.5">Daya</th>
                           <th className="px-3 py-2.5">Laju Per Jam</th>
-                          <th className="px-3 py-2.5">Estimasi Harian</th>
+                          <th className="px-3 py-2.5">Sisa Token</th>
+                          <th className="px-3 py-2.5">Est. Bulan Depan</th>
                           <th className="px-3 py-2.5">Status Risiko</th>
                           <th className="px-3 py-2.5 rounded-r-md text-right">Aksi</th>
                         </tr>
@@ -635,9 +688,12 @@ export default function AnalysisPage() {
                               {item.hourlyRate.toFixed(2)}{' '}
                               <span className="text-[9px] font-normal text-slate-500">kWh/j</span>
                             </td>
-                            <td className="px-3 py-3 font-bold text-slate-700">
-                              {item.dailyProjection.toFixed(2)}{' '}
+                            <td className="px-3 py-3 font-bold text-amber-700">
+                              {item.latestKwh.toFixed(1)}{' '}
                               <span className="text-[9px] font-normal text-slate-500">kWh</span>
+                            </td>
+                            <td className="px-3 py-3 font-bold text-teal-800">
+                              Rp {Math.round(item.monthlyCost).toLocaleString('id-ID')}
                             </td>
                             <td className="px-3 py-3">{getStatusBadge(item.daysRemaining)}</td>
                             <td className="px-3 py-3 text-right">
@@ -663,48 +719,94 @@ export default function AnalysisPage() {
               </Card>
             )}
 
-            {/* RIWAYAT TREN PEMAKAIAN 7 HARI TERAKHIR */}
+            {/* RIWAYAT TREN PEMAKAIAN (DENGAN DROPDOWN FILTER HARIAN / BULANAN) */}
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center justify-between text-slate-800">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 text-teal-700" />
-                    <span>Tren Pemakaian 7 Hari Terakhir: <strong>{selectedStoreObj?.store_name}</strong></span>
+                    <span>
+                      {chartMode === 'daily' ? 'Tren Pemakaian 7 Hari Terakhir' : 'Tren Pemakaian 6 Bulan Terakhir'}:{' '}
+                      <strong>{selectedStoreObj?.store_name}</strong>
+                    </span>
                   </div>
-                  <span className="text-xs font-normal text-slate-500 flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-slate-400" /> Total Konsumsi Harian
-                  </span>
+                  
+                  {/* DROPDOWN FILTER MODE GRAFIK */}
+                  <select
+                    value={chartMode}
+                    onChange={(e) => setChartMode(e.target.value as 'daily' | 'monthly')}
+                    className="text-xs bg-slate-50 border border-slate-200 rounded-lg p-1.5 font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="daily">Grafik Harian (7 Hari)</option>
+                    <option value="monthly">Grafik Bulanan (6 Bulan)</option>
+                  </select>
                 </CardTitle>
               </CardHeader>
+
               <CardContent className="pt-2">
-                {!selectedStoreObj?.weeklyTrend || selectedStoreObj.weeklyTrend.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian minggu ini.</p>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-7 gap-2 items-end h-32 pt-4 pb-2 border-b border-slate-100">
-                      {selectedStoreObj.weeklyTrend.map((day, idx) => {
-                        const barHeight = maxTrendKwh > 0 ? (day.totalKwh / maxTrendKwh) * 100 : 0;
-                        return (
-                          <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                            <span className="text-[10px] font-bold text-slate-700 mb-1">
-                              {day.totalKwh > 0 ? `${day.totalKwh}` : '-'}
-                            </span>
-                            <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[28px]">
-                              <div
-                                className="w-full bg-teal-600 group-hover:bg-teal-700 transition-all duration-500 rounded-t-md"
-                                style={{ height: `${Math.max(barHeight, 5)}%` }}
-                              />
+                {/* GRAFIK HARIAN (7 HARI TERAKHIR) */}
+                {chartMode === 'daily' && (
+                  !selectedStoreObj?.weeklyTrend || selectedStoreObj.weeklyTrend.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian harian.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-7 gap-2 items-end h-32 pt-4 pb-2 border-b border-slate-100">
+                        {selectedStoreObj.weeklyTrend.map((day, idx) => {
+                          const barHeight = maxWeeklyTrendKwh > 0 ? (day.totalKwh / maxWeeklyTrendKwh) * 100 : 0;
+                          return (
+                            <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
+                              <span className="text-[10px] font-bold text-slate-700 mb-1">
+                                {day.totalKwh > 0 ? `${day.totalKwh}` : '-'}
+                              </span>
+                              <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[28px]">
+                                <div
+                                  className="w-full bg-teal-600 group-hover:bg-teal-700 transition-all duration-500 rounded-t-md"
+                                  style={{ height: `${Math.max(barHeight, 5)}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-semibold text-slate-500 mt-1.5">{day.dayName}</span>
+                              <span className="text-[8px] text-slate-400">{day.dateLabel}</span>
                             </div>
-                            <span className="text-[10px] font-semibold text-slate-500 mt-1.5">{day.dayName}</span>
-                            <span className="text-[8px] text-slate-400">{day.dateLabel}</span>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-slate-500 text-center font-medium pt-1">
+                        * Konsumsi harian dihitung berdasarkan selisih pindaian kWh pada hari tersebut.
+                      </p>
                     </div>
-                    <p className="text-[11px] text-slate-500 text-center font-medium pt-1">
-                      * Konsumsi dihitung berdasarkan selisih pindaian kWh pada hari tersebut.
-                    </p>
-                  </div>
+                  )
+                )}
+
+                {/* GRAFIK BULANAN (6 BULAN TERAKHIR) */}
+                {chartMode === 'monthly' && (
+                  !selectedStoreObj?.monthlyTrend || selectedStoreObj.monthlyTrend.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian bulanan.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-6 gap-3 items-end h-32 pt-4 pb-2 border-b border-slate-100">
+                        {selectedStoreObj.monthlyTrend.map((month, idx) => {
+                          const barHeight = maxMonthlyTrendKwh > 0 ? (month.totalKwh / maxMonthlyTrendKwh) * 100 : 0;
+                          return (
+                            <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
+                              <span className="text-[10px] font-bold text-teal-800 mb-1">
+                                {month.totalKwh > 0 ? `${month.totalKwh}` : '-'}
+                              </span>
+                              <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[34px]">
+                                <div
+                                  className="w-full bg-teal-700 group-hover:bg-teal-800 transition-all duration-500 rounded-t-md"
+                                  style={{ height: `${Math.max(barHeight, 5)}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-600 mt-1.5">{month.monthLabel}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-[11px] text-slate-500 text-center font-medium pt-1">
+                        * Total akumulasi pemakaian kWh riil dalam kurun waktu 6 bulan terakhir.
+                      </p>
+                    </div>
+                  )
                 )}
               </CardContent>
             </Card>
