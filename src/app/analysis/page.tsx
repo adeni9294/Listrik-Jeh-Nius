@@ -59,6 +59,10 @@ interface StoreAnalysisItem {
   power_va: number;
   hourlyRate: number;
   actualDailyKwh: number;
+  dailyProjection: number;
+  weeklyProjection: number;
+  monthlyProjection30: number;
+  monthlyProjection31: number;
   latestKwh: number;
   daysRemaining: number;
   monthlyCost: number;
@@ -80,8 +84,10 @@ export default function AnalysisPage() {
   const [selectedMeterId, setSelectedMeterId] = useState<string>('');
 
   const [hourlyRate, setHourlyRate] = useState<number>(0);
-  const [dailyAvgKwh, setDailyAvgKwh] = useState<number>(0);
-  const [monthlyEstKwh, setMonthlyEstKwh] = useState<number>(0);
+  const [dailyEstKwh, setDailyEstKwh] = useState<number>(0);
+  const [weeklyEstKwh, setWeeklyEstKwh] = useState<number>(0);
+  const [monthlyEstKwh30, setMonthlyEstKwh30] = useState<number>(0);
+  const [monthlyEstKwh31, setMonthlyEstKwh31] = useState<number>(0);
   const [monthlyEstCost, setMonthlyEstCost] = useState<number>(0);
 
   const [isSpike, setIsSpike] = useState<boolean>(false);
@@ -103,7 +109,6 @@ export default function AnalysisPage() {
       setStoreAnalysisList([]);
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelectStore = (storeId: string) => {
@@ -112,7 +117,6 @@ export default function AnalysisPage() {
     if (targetStore) {
       applyMetrics(
         targetStore.hourlyRate,
-        targetStore.actualDailyKwh,
         targetStore.power_va,
         targetStore.isSpikeDetected,
         targetStore.spikePercent
@@ -157,7 +161,6 @@ export default function AnalysisPage() {
           const { rate, latestKwh, actualDailyKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
 
-          // Ambil pindaian 7 hari terakhir untuk tren
           const { data: weekReadings } = await supabase
             .from('meter_readings')
             .select('kwh, meter_value, created_at')
@@ -165,7 +168,6 @@ export default function AnalysisPage() {
             .gte('created_at', sevenDaysAgo.toISOString())
             .order('created_at', { ascending: true });
 
-          // Olah data tren 7 hari
           const trendMap: Record<string, { total: number; count: number; dateObj: Date }> = {};
           
           for (let i = 6; i >= 0; i--) {
@@ -197,7 +199,6 @@ export default function AnalysisPage() {
             totalKwh: Number(value.total.toFixed(1)),
           }));
 
-          // Sesi Hari Ini
           const formattedSessions: TodayScanSession[] = [];
           const todayReadings = (weekReadings || []).filter(
             (r) => new Date(r.created_at) >= startOfToday
@@ -226,10 +227,14 @@ export default function AnalysisPage() {
             });
           }
 
-          // Proyeksi Berbasis Pemakaian Riil Harian
-          const effectiveDailyKwh = actualDailyKwh > 0 ? actualDailyKwh : rate * 24;
-          const storeMonthlyCost = effectiveDailyKwh * 30 * storeTariff;
-          const daysLeft = effectiveDailyKwh > 0 ? Math.floor(latestKwh / effectiveDailyKwh) : 99;
+          // ESTIMASI SESUAI RUMUS EXCEL: LAJU PER JAM * 24 JAM
+          const dailyProj = rate > 0 ? rate * 24 : actualDailyKwh;
+          const weeklyProj = dailyProj * 7;
+          const monthlyProj30 = dailyProj * 30;
+          const monthlyProj31 = dailyProj * 31;
+
+          const storeMonthlyCost = monthlyProj30 * storeTariff;
+          const daysLeft = dailyProj > 0 ? Math.floor(latestKwh / dailyProj) : 99;
 
           detailedAnalysisList.push({
             id: m.id,
@@ -238,6 +243,10 @@ export default function AnalysisPage() {
             power_va: m.power_va || 1300,
             hourlyRate: rate,
             actualDailyKwh: actualDailyKwh,
+            dailyProjection: dailyProj,
+            weeklyProjection: weeklyProj,
+            monthlyProjection30: monthlyProj30,
+            monthlyProjection31: monthlyProj31,
             latestKwh: latestKwh,
             daysRemaining: daysLeft,
             monthlyCost: storeMonthlyCost,
@@ -265,7 +274,6 @@ export default function AnalysisPage() {
       if (activeItem) {
         applyMetrics(
           activeItem.hourlyRate,
-          activeItem.actualDailyKwh,
           activeItem.power_va,
           activeItem.isSpikeDetected,
           activeItem.spikePercent
@@ -275,7 +283,6 @@ export default function AnalysisPage() {
         const activeMeter = currentMeters.find((m) => m.id === targetMeterId);
         applyMetrics(
           rateData.rate,
-          rateData.actualDailyKwh,
           activeMeter?.power_va || 1300,
           rateData.isSpikeDetected,
           rateData.spikePercent
@@ -288,7 +295,6 @@ export default function AnalysisPage() {
     }
   };
 
-  // PEMBARUAN LOGIKA: Perhitungan Rata-Rata Jam-Jaman berbasis Akumulasi Hari Ini (Sesuai Dashboard)
   const calculateRateAndReadingForMeter = async (
     meterId: string
   ): Promise<{ rate: number; latestKwh: number; actualDailyKwh: number; isSpikeDetected: boolean; spikePercent: number }> => {
@@ -317,7 +323,6 @@ export default function AnalysisPage() {
     let actualDailyKwh = 0;
     let accumulatedHourlyRate = 0;
 
-    // 1. UTAMA: Jika pindaian hari ini >= 2, hitung dari selisih awal & akhir hari ini
     if (todayReadings && todayReadings.length >= 2) {
       const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
       const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
@@ -335,7 +340,6 @@ export default function AnalysisPage() {
       }
     }
 
-    // 2. DETEKSI LONJAKAN (Spike) & Fallback Rate
     let currentIntervalRate = 0;
     let isSpike = false;
     let spikePct = 0;
@@ -393,22 +397,26 @@ export default function AnalysisPage() {
 
   const applyMetrics = (
     ratePerHour: number,
-    realDailyKwh: number = 0,
     powerVa: number = 1300,
     spikeDetected: boolean = false,
     spikePct: number = 0
   ) => {
-    const daily = realDailyKwh > 0 ? realDailyKwh : ratePerHour * 24;
-    const monthlyKwh = daily * 30;
+    const dailyEst = ratePerHour * 24;
+    const weeklyEst = dailyEst * 7;
+    const monthlyKwh30 = dailyEst * 30;
+    const monthlyKwh31 = dailyEst * 31;
+
     const tariff = getTariffRate(powerVa);
-    const monthlyCost = monthlyKwh * tariff;
+    const monthlyCost = monthlyKwh30 * tariff;
 
     setIsSpike(spikeDetected);
     setSpikePercent(spikePct);
 
     setHourlyRate(ratePerHour);
-    setDailyAvgKwh(daily);
-    setMonthlyEstKwh(monthlyKwh);
+    setDailyEstKwh(dailyEst);
+    setWeeklyEstKwh(weeklyEst);
+    setMonthlyEstKwh30(monthlyKwh30);
+    setMonthlyEstKwh31(monthlyKwh31);
     setMonthlyEstCost(monthlyCost);
   };
 
@@ -431,13 +439,15 @@ export default function AnalysisPage() {
   const handleExportCSV = () => {
     if (storeAnalysisList.length === 0) return;
 
-    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Pemakaian Riil Hari Ini (kWh)', 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
+    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Pemakaian Riil Hari Ini (kWh)', 'Estimasi Harian (kWh)', 'Estimasi Bulanan 30h (kWh)', 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
     const rows = storeAnalysisList.map((item) => [
       `"${item.store_name}"`,
       `"${item.meter_number || '-'}"`,
       item.power_va,
       item.hourlyRate.toFixed(2),
       item.actualDailyKwh.toFixed(1),
+      item.dailyProjection.toFixed(2),
+      item.monthlyProjection30.toFixed(2),
       Math.round(item.monthlyCost),
       `"${item.daysRemaining <= 2 ? 'Kritis' : item.daysRemaining <= 5 ? 'Warning' : 'Aman'} (${item.daysRemaining} hari)"`,
     ]);
@@ -483,7 +493,7 @@ export default function AnalysisPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
-      {/* Header & Control Actions */}
+      {/* Header Actions */}
       <div className="flex justify-between items-start gap-2">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Analisis Pemakaian</h1>
@@ -563,12 +573,8 @@ export default function AnalysisPage() {
           </CardContent>
         </Card>
       ) : (
-        /* LAYOUT DESKTOP 2 KOLOM */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* KOLOM UTAMA KIRI (2 SPAN DESKTOP) */}
           <div className="lg:col-span-2 space-y-6">
-            
             {storeAnalysisList.length > 0 && (
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
@@ -590,6 +596,7 @@ export default function AnalysisPage() {
                           <th className="px-3 py-2.5 rounded-l-md">Toko</th>
                           <th className="px-3 py-2.5">Daya</th>
                           <th className="px-3 py-2.5">Laju Per Jam</th>
+                          <th className="px-3 py-2.5">Estimasi Harian</th>
                           <th className="px-3 py-2.5">Status Risiko</th>
                           <th className="px-3 py-2.5 rounded-r-md text-right">Aksi</th>
                         </tr>
@@ -610,6 +617,10 @@ export default function AnalysisPage() {
                             <td className="px-3 py-3 font-bold text-slate-700">
                               {item.hourlyRate.toFixed(2)}{' '}
                               <span className="text-[9px] font-normal text-slate-500">kWh/j</span>
+                            </td>
+                            <td className="px-3 py-3 font-bold text-slate-700">
+                              {item.dailyProjection.toFixed(2)}{' '}
+                              <span className="text-[9px] font-normal text-slate-500">kWh</span>
                             </td>
                             <td className="px-3 py-3">{getStatusBadge(item.daysRemaining)}</td>
                             <td className="px-3 py-3 text-right">
@@ -736,9 +747,7 @@ export default function AnalysisPage() {
             </Card>
           </div>
 
-          {/* KOLOM KANAN / SIDEBAR (1 SPAN DESKTOP) */}
           <div className="space-y-6">
-            
             {/* BANNER PERINGATAN LONJAKAN */}
             {isSpike ? (
               <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl text-xs space-y-3 shadow-sm">
@@ -823,7 +832,7 @@ export default function AnalysisPage() {
               </Card>
             )}
 
-            {/* 3 Overview Cards Spesifik Toko */}
+            {/* OVERVIEW METRIK BERSESUAIAN EXCEL */}
             <div className="grid grid-cols-3 gap-2.5">
               <Card className={`border-slate-200 ${isSpike ? 'bg-rose-50/50 border-rose-300' : 'bg-slate-50'}`}>
                 <CardContent className="p-3 text-center">
@@ -838,18 +847,16 @@ export default function AnalysisPage() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-slate-50 border-slate-200">
+              <Card className="bg-amber-50/80 border border-amber-200">
                 <CardContent className="p-3 text-center">
-                  <div className="flex justify-center items-center gap-1 text-amber-600 mb-1">
+                  <div className="flex justify-center items-center gap-1 text-amber-700 mb-1">
                     <Zap className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase">Per Hari</span>
+                    <span className="text-[10px] font-bold uppercase">Terpakai Hari Ini</span>
                   </div>
-                  <div className="text-base font-extrabold text-slate-800">
-                    {dailyAvgKwh.toFixed(1)}
+                  <div className="text-base font-extrabold text-amber-900">
+                    {selectedStoreObj?.actualDailyKwh ? selectedStoreObj.actualDailyKwh.toFixed(1) : '0.0'}
                   </div>
-                  <span className="text-[9px] text-slate-500">
-                    {selectedStoreObj?.actualDailyKwh && selectedStoreObj.actualDailyKwh > 0 ? 'kWh Riil Hari Ini' : 'kWh/24j'}
-                  </span>
+                  <span className="text-[9px] text-amber-700 font-medium">kWh Jam Berjalan</span>
                 </CardContent>
               </Card>
 
@@ -860,7 +867,7 @@ export default function AnalysisPage() {
                     <span className="text-[10px] font-bold uppercase">Beli Token</span>
                   </div>
                   <div className="text-base font-extrabold text-teal-100">
-                    {monthlyEstKwh.toFixed(0)} <span className="text-[10px]">kWh</span>
+                    {monthlyEstKwh30.toFixed(0)} <span className="text-[10px]">kWh</span>
                   </div>
                   <span className="text-[9px] text-teal-300 block font-mono">
                     ~ Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}
@@ -868,6 +875,34 @@ export default function AnalysisPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* BLOCK DATA ESTIMASI LENGKAP */}
+            <Card className="border-slate-200 bg-slate-100/80 shadow-xs">
+              <CardContent className="p-4 space-y-2">
+                <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider text-center">
+                  Data Estimasi Proyeksi ({selectedStoreObj?.store_name})
+                </span>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1">
+                  <div>
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase">Harian</span>
+                    <span className="font-extrabold text-slate-800">{dailyEstKwh.toFixed(2)} kWh</span>
+                  </div>
+                  <div className="border-x border-slate-200">
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase">Mingguan</span>
+                    <span className="font-extrabold text-slate-800">{weeklyEstKwh.toFixed(2)} kWh</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase">Bulanan</span>
+                    <span className="font-extrabold text-slate-800 block">
+                      {monthlyEstKwh30.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(30h)</span>
+                    </span>
+                    <span className="font-extrabold text-slate-800 block mt-0.5">
+                      {monthlyEstKwh31.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(31h)</span>
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* AI Recommendation for Budget */}
             <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
@@ -878,13 +913,12 @@ export default function AnalysisPage() {
                     Anggaran Listrik Bulan Depan ({selectedStoreObj?.store_name}):
                   </span>
                   <p className="leading-relaxed">
-                    Siapkan estimasi token <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan berdasarkan pola konsumsi riil harian.
+                    Siapkan estimasi token <strong>{monthlyEstKwh30.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan berdasarkan pola konsumsi riil harian.
                   </p>
                 </div>
               </CardContent>
             </Card>
           </div>
-
         </div>
       )}
     </div>
