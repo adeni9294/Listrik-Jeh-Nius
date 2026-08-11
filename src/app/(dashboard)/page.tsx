@@ -52,14 +52,37 @@ interface MeterWithReading {
 // FUNGSI UTAMA: MENGAMBIL NAMA BULAN DEPAN & JUMLAH HARINYA SECARA OTOMATIS
 const getNextMonthInfo = () => {
   const now = new Date();
-  // Tanggal 1 pada bulan berikutnya (otomatis menyesuaikan jika pergantian tahun Des -> Jan)
   const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   
   const monthName = nextMonthDate.toLocaleDateString('id-ID', { month: 'long' });
-  // Mengambil tanggal terakhir di bulan berikutnya untuk jumlah hari yang presisi (misal: 28, 30, atau 31)
   const daysInNextMonth = new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0).getDate();
 
   return { monthName, daysInNextMonth };
+};
+
+// HELPER: MENGHITUNG ESTIMASI TANGGAL & WAKTU HABIS TOKEN
+const calculateExpiryDate = (remainingKwh: number, hourlyRate: number) => {
+  if (hourlyRate <= 0 || remainingKwh <= 0) return null;
+
+  const hoursLeft = remainingKwh / hourlyRate;
+  const expiryDate = new Date();
+  expiryDate.setTime(expiryDate.getTime() + hoursLeft * 60 * 60 * 1000);
+
+  const formattedDate = expiryDate.toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  const formattedTime = expiryDate.toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const daysLeft = Math.floor(hoursLeft / 24);
+
+  return { formattedDate, formattedTime, daysLeft, hoursLeft };
 };
 
 export default function DashboardPage() {
@@ -650,18 +673,35 @@ export default function DashboardPage() {
               </Card>
             ))}
 
-            {/* AI Energy Insight - DINAMIS DENGAN NAMA BULAN DEPAN */}
+            {/* AI Energy Insight - PREDIKSI TANGGAL & WAKTU HABIS */}
             <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
               <CardHeader className="p-5 pb-2 flex flex-row items-center space-x-2">
                 <Cpu className="w-5 h-5 text-teal-700" />
                 <CardTitle className="text-sm font-bold text-teal-900">AI Energy Insight</CardTitle>
               </CardHeader>
               <CardContent className="p-5 pt-0 text-xs text-slate-700 space-y-3">
-                <p className="leading-relaxed">
-                  Rata-rata konsumsi listrik {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} saat ini adalah{' '}
-                  <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (dengan akumulasi riil hari ini{' '}
-                  <strong>{filteredMeters.reduce((acc, curr) => acc + curr.actualDailyKwh, 0).toFixed(1)} kWh</strong>).
-                </p>
+                {(() => {
+                  const expiry = calculateExpiryDate(displayTokenKwh, displayHourlyRate);
+
+                  if (!expiry) {
+                    return (
+                      <p className="leading-relaxed text-slate-500 italic">
+                        Belum ada data laju pemakaian yang cukup untuk memprediksi tanggal habisnya token.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <p className="leading-relaxed">
+                      Berdasarkan sisa token saat ini (<strong>{displayTokenKwh.toFixed(1)} kWh</strong>) dan laju pemakaian <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong>, sisa token {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} diprediksi akan habis pada{' '}
+                      <strong className="text-teal-900 bg-teal-100/80 px-1.5 py-0.5 rounded font-bold">
+                        {expiry.formattedDate}
+                      </strong>{' '}
+                      sekitar pukul <strong>{expiry.formattedTime} WIB</strong> ({expiry.daysLeft} hari lagi).
+                    </p>
+                  );
+                })()}
+
                 <div className="p-3 bg-white rounded-xl border border-teal-100 text-xs text-teal-800 leading-relaxed">
                   💡 <strong>Rekomendasi Token Bulan {nextMonthName || 'Depan'}:</strong> Proyeksi operasional disarankan menyiapkan sekitar <strong>{(displayHourlyRate * 24 * nextMonthDays).toFixed(0)} kWh</strong> untuk {nextMonthDays} hari ke depan.
                 </div>
