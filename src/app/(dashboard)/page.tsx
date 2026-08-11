@@ -39,6 +39,7 @@ interface MeterWithReading {
   power_va: number;
   lastReading: number | null;
   hourlyRate: number;
+  actualDailyKwh: number;
   dailyProjection: number;
   weeklyProjection: number;
   monthlyProjection: number;
@@ -119,7 +120,7 @@ export default function DashboardPage() {
       startOfToday.setHours(0, 0, 0, 0);
 
       for (const m of meters) {
-        // Ambil 10 pindaian terakhir untuk memfilter pindaian yang terlalu dekat
+        // Ambil 10 pindaian terakhir untuk pemfilteran interval valid
         const { data: readings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
@@ -127,6 +128,7 @@ export default function DashboardPage() {
           .order('created_at', { ascending: false })
           .limit(10);
 
+        // Ambil seluruh pindaian hari ini (diurutkan kronologis dari awal hari)
         const { data: todayReadings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, created_at')
@@ -137,6 +139,8 @@ export default function DashboardPage() {
         const scanCountToday = todayReadings?.length || 0;
 
         const formattedSessions: TodayScanSession[] = [];
+        let actualDailyKwh = 0;
+
         if (todayReadings && todayReadings.length > 0) {
           todayReadings.forEach((r, idx) => {
             const val = Number(r.meter_value ?? r.kwh ?? 0);
@@ -161,13 +165,19 @@ export default function DashboardPage() {
               sessionName: sessionLabel,
             });
           });
+
+          // HITUNG PEMAKAIAN RIIL HARI INI: Pindaian Pertama vs Pindaian Terakhir Hari Ini
+          if (todayReadings.length >= 2) {
+            const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
+            const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
+            if (firstValToday >= latestValToday) {
+              actualDailyKwh = firstValToday - latestValToday;
+            }
+          }
         }
 
         let lastVal: number | null = null;
         let hourlyRate = 0;
-        let dailyProj = 0;
-        let weeklyProj = 0;
-        let monthlyProj = 0;
         let intervalHours = 0;
         let avgMeterConfidence = 85;
 
@@ -176,7 +186,7 @@ export default function DashboardPage() {
           avgMeterConfidence = Number(readings[0].confidence || 85);
 
           if (readings.length >= 2) {
-            // PENYESUAIAN SAMAKAN LOGIKA: Filter pindaian yang berjarak minimal 5 menit
+            // Filter pindaian berjarak minimal 5 menit untuk menghitung laju per jam
             const validReadings: typeof readings = [readings[0]];
             for (let i = 1; i < readings.length; i++) {
               const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
@@ -199,12 +209,14 @@ export default function DashboardPage() {
                 hourlyRate = (previousValid - latest) / intervalHours;
               }
             }
-
-            dailyProj = hourlyRate * 24;
-            weeklyProj = dailyProj * 7;
-            monthlyProj = dailyProj * 30;
           }
         }
+
+        // PENYESUAIAN METRIK: Proyeksi berbasis pemakaian riil harian (Fallback ke laju * 24 jika pindaian < 2)
+        const dailyBaseForProjection = actualDailyKwh > 0 ? actualDailyKwh : hourlyRate * 24;
+        const dailyProj = dailyBaseForProjection;
+        const weeklyProj = dailyBaseForProjection * 7;
+        const monthlyProj = dailyBaseForProjection * 30;
 
         const storePowerVa = m.power_va || 1300;
 
@@ -215,6 +227,7 @@ export default function DashboardPage() {
           power_va: storePowerVa,
           lastReading: lastVal,
           hourlyRate,
+          actualDailyKwh,
           dailyProjection: dailyProj,
           weeklyProjection: weeklyProj,
           monthlyProjection: monthlyProj,
@@ -285,8 +298,9 @@ export default function DashboardPage() {
 
   const displayHourlyRate = filteredMeters.reduce((acc, curr) => acc + curr.hourlyRate, 0);
 
-  const totalDailyRate = displayHourlyRate * 24;
-  const displayDaysLeft = totalDailyRate > 0 ? Math.max(0, Math.floor(displayTokenKwh / totalDailyRate)) : 0;
+  // Perhitungan Estimasi Habis berdasarkan Total Pemakaian Riil Harian
+  const totalDailyKwh = filteredMeters.reduce((acc, curr) => acc + curr.dailyProjection, 0);
+  const displayDaysLeft = totalDailyKwh > 0 ? Math.max(0, Math.floor(displayTokenKwh / totalDailyKwh)) : 0;
 
   const displayTodayScans = filteredMeters.reduce((acc, curr) => acc + curr.todayScanCount, 0);
 
@@ -529,7 +543,9 @@ export default function DashboardPage() {
 
                       <div className="bg-slate-100/70 p-3 rounded-xl grid grid-cols-3 gap-2 text-center text-xs">
                         <div>
-                          <span className="text-slate-500 block text-[10px] uppercase font-bold">Sehari (24j)</span>
+                          <span className="text-slate-500 block text-[10px] uppercase font-bold">
+                            {m.actualDailyKwh > 0 ? 'Terpakai Hari Ini' : 'Estimasi Sehari'}
+                          </span>
                           <span className="font-extrabold text-slate-800">{m.dailyProjection.toFixed(1)} kWh</span>
                         </div>
                         <div className="border-x border-slate-200">
@@ -607,11 +623,11 @@ export default function DashboardPage() {
               <CardContent className="p-5 pt-0 text-xs text-slate-700 space-y-3">
                 <p className="leading-relaxed">
                   Rata-rata konsumsi listrik {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} saat ini adalah{' '}
-                  <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (sekitar{' '}
-                  <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
+                  <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (dengan akumulasi riil hari ini{' '}
+                  <strong>{totalDailyKwh.toFixed(1)} kWh</strong>).
                 </p>
                 <div className="p-3 bg-white rounded-xl border border-teal-100 text-xs text-teal-800 leading-relaxed">
-                  💡 <strong>Rekomendasi :</strong> Lakukan pemindaian secara berkala kapan saja saat operasional toko untuk mendapatkan analisis pemakaian listrik yang lebih akurat.
+                  💡 <strong>Rekomendasi Pembelian Token:</strong> Proyeksi bulanan toko disarankan menyiapkan sekitar <strong>{(totalDailyKwh * 30).toFixed(0)} kWh</strong> per bulan untuk menjaga kelancaran operasional toko.
                 </div>
               </CardContent>
             </Card>
