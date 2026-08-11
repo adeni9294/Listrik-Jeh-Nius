@@ -154,10 +154,10 @@ export default function AnalysisPage() {
       const detailedAnalysisList: StoreAnalysisItem[] = [];
       if (currentMeters.length > 0) {
         for (const m of currentMeters) {
-          const { rate, latestKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
+          const { rate, latestKwh, actualDailyKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
 
-          // Ambil pindaian 7 hari terakhir untuk tren & riwayat pindaian
+          // Ambil pindaian 7 hari terakhir untuk tren
           const { data: weekReadings } = await supabase
             .from('meter_readings')
             .select('kwh, meter_value, created_at')
@@ -203,8 +203,6 @@ export default function AnalysisPage() {
             (r) => new Date(r.created_at) >= startOfToday
           );
 
-          let actualDailyKwh = 0;
-
           if (todayReadings.length > 0) {
             todayReadings.forEach((r: any, idx: number) => {
               const val = Number(r.meter_value ?? r.kwh ?? 0);
@@ -226,18 +224,9 @@ export default function AnalysisPage() {
                 sessionName: `Pindaian #${idx + 1}`,
               });
             });
-
-            // PEMAKAIAN RIIL HARI INI: Pindaian Pertama vs Pindaian Terakhir Hari Ini
-            if (todayReadings.length >= 2) {
-              const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
-              const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
-              if (firstValToday >= latestValToday) {
-                actualDailyKwh = firstValToday - latestValToday;
-              }
-            }
           }
 
-          // Gunakan pemakaian riil harian (fallback ke rate * 24 jika pindaian < 2)
+          // Proyeksi Berbasis Pemakaian Riil Harian
           const effectiveDailyKwh = actualDailyKwh > 0 ? actualDailyKwh : rate * 24;
           const storeMonthlyCost = effectiveDailyKwh * 30 * storeTariff;
           const daysLeft = effectiveDailyKwh > 0 ? Math.floor(latestKwh / effectiveDailyKwh) : 99;
@@ -286,7 +275,7 @@ export default function AnalysisPage() {
         const activeMeter = currentMeters.find((m) => m.id === targetMeterId);
         applyMetrics(
           rateData.rate,
-          0,
+          rateData.actualDailyKwh,
           activeMeter?.power_va || 1300,
           rateData.isSpikeDetected,
           rateData.spikePercent
@@ -299,10 +288,20 @@ export default function AnalysisPage() {
     }
   };
 
-  // Filter Jarak Minimal (5 Menit) & Pembandingan Laju Antar-Interval
+  // PEMBARUAN LOGIKA: Perhitungan Rata-Rata Jam-Jaman berbasis Akumulasi Hari Ini (Sesuai Dashboard)
   const calculateRateAndReadingForMeter = async (
     meterId: string
-  ): Promise<{ rate: number; latestKwh: number; isSpikeDetected: boolean; spikePercent: number }> => {
+  ): Promise<{ rate: number; latestKwh: number; actualDailyKwh: number; isSpikeDetected: boolean; spikePercent: number }> => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const { data: todayReadings } = await supabase
+      .from('meter_readings')
+      .select('kwh, meter_value, created_at')
+      .eq('meter_id', meterId)
+      .gte('created_at', startOfToday.toISOString())
+      .order('created_at', { ascending: true });
+
     const { data: readings } = await supabase
       .from('meter_readings')
       .select('kwh, meter_value, created_at')
@@ -310,61 +309,83 @@ export default function AnalysisPage() {
       .order('created_at', { ascending: false })
       .limit(10);
 
-    if (!readings || readings.length === 0) {
-      return { rate: 0, latestKwh: 0, isSpikeDetected: false, spikePercent: 0 };
+    let latestVal = 0;
+    if (readings && readings.length > 0) {
+      latestVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
     }
 
-    const latestVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
-    if (readings.length < 2) {
-      return { rate: 0, latestKwh: latestVal, isSpikeDetected: false, spikePercent: 0 };
-    }
+    let actualDailyKwh = 0;
+    let accumulatedHourlyRate = 0;
 
-    const validReadings: typeof readings = [readings[0]];
-    for (let i = 1; i < readings.length; i++) {
-      const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
-      const currTime = new Date(readings[i].created_at).getTime();
-      const diffMinutes = (prevTime - currTime) / (1000 * 60);
+    // 1. UTAMA: Jika pindaian hari ini >= 2, hitung dari selisih awal & akhir hari ini
+    if (todayReadings && todayReadings.length >= 2) {
+      const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
+      const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
 
-      if (diffMinutes >= 5) {
-        validReadings.push(readings[i]);
+      if (firstValToday >= latestValToday) {
+        actualDailyKwh = firstValToday - latestValToday;
+      }
+
+      const firstTime = new Date(todayReadings[0].created_at).getTime();
+      const latestTime = new Date(todayReadings[todayReadings.length - 1].created_at).getTime();
+      const totalHoursToday = (latestTime - firstTime) / (1000 * 60 * 60);
+
+      if (totalHoursToday > 0 && actualDailyKwh > 0) {
+        accumulatedHourlyRate = actualDailyKwh / totalHoursToday;
       }
     }
 
-    if (validReadings.length < 2) {
-      return { rate: 0, latestKwh: latestVal, isSpikeDetected: false, spikePercent: 0 };
-    }
-
-    const val1 = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
-    const val2 = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
-    const time1 = new Date(validReadings[0].created_at).getTime();
-    const time2 = new Date(validReadings[1].created_at).getTime();
-    const hoursLatest = (time1 - time2) / (1000 * 60 * 60);
-
-    const consumedLatest = val2 >= val1 ? val2 - val1 : 0;
-    const currentRate = hoursLatest > 0 ? consumedLatest / hoursLatest : 0;
-
+    // 2. DETEKSI LONJAKAN (Spike) & Fallback Rate
+    let currentIntervalRate = 0;
     let isSpike = false;
     let spikePct = 0;
 
-    if (validReadings.length >= 3) {
-      const val3 = Number(validReadings[2].meter_value ?? validReadings[2].kwh ?? 0);
-      const time3 = new Date(validReadings[2].created_at).getTime();
-      const hoursPrev = (time2 - time3) / (1000 * 60 * 60);
+    if (readings && readings.length >= 2) {
+      const validReadings: typeof readings = [readings[0]];
+      for (let i = 1; i < readings.length; i++) {
+        const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
+        const currTime = new Date(readings[i].created_at).getTime();
+        const diffMinutes = (prevTime - currTime) / (1000 * 60);
 
-      const consumedPrev = val3 >= val2 ? val3 - val2 : 0;
-      const prevRate = hoursPrev > 0 ? consumedPrev / hoursPrev : 0;
+        if (diffMinutes >= 5) {
+          validReadings.push(readings[i]);
+        }
+      }
 
-      if (prevRate > 0 && currentRate > prevRate) {
-        spikePct = Math.round(((currentRate - prevRate) / prevRate) * 100);
-        if (spikePct >= 25) {
-          isSpike = true;
+      if (validReadings.length >= 2) {
+        const val1 = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
+        const val2 = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
+        const time1 = new Date(validReadings[0].created_at).getTime();
+        const time2 = new Date(validReadings[1].created_at).getTime();
+        const hoursLatest = (time1 - time2) / (1000 * 60 * 60);
+
+        const consumedLatest = val2 >= val1 ? val2 - val1 : 0;
+        currentIntervalRate = hoursLatest > 0 ? consumedLatest / hoursLatest : 0;
+
+        if (validReadings.length >= 3) {
+          const val3 = Number(validReadings[2].meter_value ?? validReadings[2].kwh ?? 0);
+          const time3 = new Date(validReadings[2].created_at).getTime();
+          const hoursPrev = (time2 - time3) / (1000 * 60 * 60);
+
+          const consumedPrev = val3 >= val2 ? val3 - val2 : 0;
+          const prevRate = hoursPrev > 0 ? consumedPrev / hoursPrev : 0;
+
+          if (prevRate > 0 && currentIntervalRate > prevRate) {
+            spikePct = Math.round(((currentIntervalRate - prevRate) / prevRate) * 100);
+            if (spikePct >= 25) {
+              isSpike = true;
+            }
+          }
         }
       }
     }
 
+    const finalHourlyRate = accumulatedHourlyRate > 0 ? accumulatedHourlyRate : currentIntervalRate;
+
     return {
-      rate: currentRate,
+      rate: finalHourlyRate,
       latestKwh: latestVal,
+      actualDailyKwh: actualDailyKwh,
       isSpikeDetected: isSpike,
       spikePercent: spikePct,
     };
@@ -377,7 +398,6 @@ export default function AnalysisPage() {
     spikeDetected: boolean = false,
     spikePct: number = 0
   ) => {
-    // Jika data riil hari ini ada, gunakan data riil. Jika belum, gunakan proyeksi laju * 24.
     const daily = realDailyKwh > 0 ? realDailyKwh : ratePerHour * 24;
     const monthlyKwh = daily * 30;
     const tariff = getTariffRate(powerVa);
@@ -733,7 +753,7 @@ export default function AnalysisPage() {
                 </div>
 
                 <p className="text-slate-700 leading-relaxed font-medium">
-                  Laju pindaian terbaru ({hourlyRate.toFixed(2)} kWh/jam) terdeteksi naik tinggi dibanding pindaian sebelumnya!
+                  Laju pindaian terbaru terdeteksi naik tinggi dibanding pindaian sebelumnya!
                 </p>
 
                 <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-2 text-slate-800 font-medium">
