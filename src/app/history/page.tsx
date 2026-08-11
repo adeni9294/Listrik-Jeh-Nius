@@ -382,7 +382,7 @@ export default function HistoryPage() {
                           </div>
                           <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5 font-mono">
                             <Clock className="w-3 h-3" />
-                            {formatTime(row.created_at)}
+                            {formatTime(row.created_at)} WIB
                           </div>
                         </td>
 
@@ -422,7 +422,7 @@ export default function HistoryPage() {
                                 setActivePhoto({
                                   url: row.image_url!,
                                   title: row.store_name,
-                                  date: `${formatDate(row.created_at)} ${formatTime(row.created_at)}`,
+                                  date: `${formatDate(row.created_at)} ${formatTime(row.created_at)} WIB`,
                                 })
                               }
                               className="relative group inline-block focus:outline-none"
