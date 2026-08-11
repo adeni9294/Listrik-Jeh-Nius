@@ -184,30 +184,40 @@ export default function DashboardPage() {
         if (readings && readings.length > 0) {
           lastVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
           avgMeterConfidence = Number(readings[0].confidence || 85);
+        }
 
-          if (readings.length >= 2) {
-            // Filter pindaian berjarak minimal 5 menit untuk menghitung laju per jam
-            const validReadings: typeof readings = [readings[0]];
-            for (let i = 1; i < readings.length; i++) {
-              const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
-              const currTime = new Date(readings[i].created_at).getTime();
-              const diffMinutes = (prevTime - currTime) / (1000 * 60);
+        // PEMBARUAN LOGIKA LAJU PER JAM: Akumulasi Riil Hari Ini / Total Jam Hari Ini
+        if (todayReadings && todayReadings.length >= 2) {
+          const firstTime = new Date(todayReadings[0].created_at).getTime();
+          const latestTime = new Date(todayReadings[todayReadings.length - 1].created_at).getTime();
+          const totalHoursToday = (latestTime - firstTime) / (1000 * 60 * 60);
 
-              if (diffMinutes >= 5) {
-                validReadings.push(readings[i]);
-              }
+          if (totalHoursToday > 0 && actualDailyKwh > 0) {
+            hourlyRate = actualDailyKwh / totalHoursToday;
+            intervalHours = totalHoursToday;
+          }
+        } else if (readings && readings.length >= 2) {
+          // Fallback jika baru 1 pindaian hari ini
+          const validReadings: typeof readings = [readings[0]];
+          for (let i = 1; i < readings.length; i++) {
+            const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
+            const currTime = new Date(readings[i].created_at).getTime();
+            const diffMinutes = (prevTime - currTime) / (1000 * 60);
+
+            if (diffMinutes >= 5) {
+              validReadings.push(readings[i]);
             }
+          }
 
-            if (validReadings.length >= 2) {
-              const latest = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
-              const previousValid = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
+          if (validReadings.length >= 2) {
+            const latest = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
+            const previousValid = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
 
-              const diffMs = new Date(validReadings[0].created_at).getTime() - new Date(validReadings[1].created_at).getTime();
-              intervalHours = diffMs / (1000 * 60 * 60);
+            const diffMs = new Date(validReadings[0].created_at).getTime() - new Date(validReadings[1].created_at).getTime();
+            intervalHours = diffMs / (1000 * 60 * 60);
 
-              if (previousValid >= latest && intervalHours > 0) {
-                hourlyRate = (previousValid - latest) / intervalHours;
-              }
+            if (previousValid >= latest && intervalHours > 0) {
+              hourlyRate = (previousValid - latest) / intervalHours;
             }
           }
         }
