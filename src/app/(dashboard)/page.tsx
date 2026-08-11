@@ -17,9 +17,7 @@ import {
   AlertTriangle,
   ShieldCheck,
   Lock,
-  Sun,
-  Moon,
-  Sunset,
+  Activity,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -141,8 +139,9 @@ export default function DashboardPage() {
         if (todayReadings && todayReadings.length > 0) {
           todayReadings.forEach((r, idx) => {
             const val = Number(r.meter_value ?? r.kwh ?? 0);
-            const timeStr = new Date(r.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-            
+            const dateObj = new Date(r.created_at);
+            const timeStr = dateObj.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+
             let consumed: number | null = null;
             if (idx > 0) {
               const prevVal = Number(todayReadings[idx - 1].meter_value ?? todayReadings[idx - 1].kwh ?? 0);
@@ -151,7 +150,8 @@ export default function DashboardPage() {
               }
             }
 
-            const sessionLabel = idx === 0 ? 'Pindaian 1 (Pagi/Buka)' : idx === 1 ? 'Pindaian 2 (Siang)' : `Pindaian ${idx + 1} (Malam/Tutup)`;
+            // PENYESUAIAN: Label berbasis urutan fleksibel (tanpa batasan Pagi/Siang/Malam)
+            const sessionLabel = `Pindaian #${idx + 1}`;
 
             formattedSessions.push({
               id: r.id,
@@ -178,7 +178,7 @@ export default function DashboardPage() {
           if (readings.length >= 2) {
             const latest = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
             const oldest = Number(readings[readings.length - 1].meter_value ?? readings[readings.length - 1].kwh ?? 0);
-            
+
             const diffMs = new Date(readings[0].created_at).getTime() - new Date(readings[readings.length - 1].created_at).getTime();
             intervalHours = diffMs / (1000 * 60 * 60);
 
@@ -292,13 +292,12 @@ export default function DashboardPage() {
     if (isAllMode) return { label: `${count} Scan Global`, color: 'text-emerald-300' };
     if (count === 1) return { label: '1 Scan (Basic)', color: 'text-amber-300' };
     if (count === 2) return { label: '2 Scan (Optimal)', color: 'text-emerald-300' };
-    return { label: `${count} Scan (Advanced)`, color: 'text-teal-200' };
+    return { label: `${count} Scan (Active)`, color: 'text-teal-200' };
   };
 
   const currentScanMode = getScanModeText(displayTodayScans);
 
   return (
-    /* Mengubah max-w-lg menjadi max-w-6xl agar lebar dan pas di layar Desktop */
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
       {/* Header Info */}
       <div className="flex justify-between items-center gap-2">
@@ -373,7 +372,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       ) : (
-        /* LAYOUT DESKTOP: GRID 2 KOLOM PADA DESKTOP */
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* KOLOM KIRI (2 SPAN PADA DESKTOP) */}
@@ -539,12 +537,14 @@ export default function DashboardPage() {
           {/* KOLOM KANAN (DESKTOP SIDEBAR 1 SPAN) */}
           <div className="space-y-6">
             
-            {/* PERBANDINGAN PINDAIAN HARI INI */}
+            {/* RIWAYAT PINDAIAN HARI INI (TIME-SERIES LOG) */}
             {filteredMeters.map((m) => (
               <Card key={`sessions-${m.id}`} className="border-teal-200 bg-teal-50/30 shadow-sm">
                 <CardHeader className="pb-2 pt-4 px-5">
                   <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                    <span>📊 Pindaian Sesi Hari Ini ({m.store_name})</span>
+                    <span className="flex items-center gap-1.5">
+                      <Activity className="w-4 h-4 text-teal-600" /> Riwayat Pindaian Hari Ini ({m.store_name})
+                    </span>
                     <span className="text-[11px] text-teal-700 font-normal">
                       {m.todaySessions.length}x Pindaian
                     </span>
@@ -554,22 +554,18 @@ export default function DashboardPage() {
                   {m.todaySessions.length === 0 ? (
                     <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
                   ) : (
-                    m.todaySessions.map((s, idx) => (
+                    m.todaySessions.map((s) => (
                       <div
                         key={s.id}
                         className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
                       >
                         <div className="flex items-center gap-2.5">
-                          {idx === 0 ? (
-                            <Sun className="w-4 h-4 text-amber-500" />
-                          ) : idx === 1 ? (
-                            <Sunset className="w-4 h-4 text-orange-500" />
-                          ) : (
-                            <Moon className="w-4 h-4 text-indigo-500" />
-                          )}
+                          <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
+                            <Clock className="w-4 h-4" />
+                          </div>
                           <div>
                             <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
-                            <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                            <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
                           </div>
                         </div>
 
@@ -601,7 +597,7 @@ export default function DashboardPage() {
                   <strong>{(displayHourlyRate * 24).toFixed(1)} kWh/hari</strong>).
                 </p>
                 <div className="p-3 bg-white rounded-xl border border-teal-100 text-xs text-teal-800 leading-relaxed">
-                  💡 <strong>Rekomendasi :</strong> Pastikan pindaian dilakukan minimal 3x sehari (pagi, siang & malam) untuk mengaktifkan <strong>Optimal Mode</strong> guna deteksi anomali yang presisi.
+                  💡 <strong>Rekomendasi :</strong> Lakukan pemindaian secara berkala kapan saja saat operasional toko untuk mendapatkan analisis pemakaian listrik yang lebih akurat.
                 </div>
               </CardContent>
             </Card>
