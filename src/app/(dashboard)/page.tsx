@@ -43,6 +43,7 @@ interface MeterWithReading {
   dailyProjection: number;
   weeklyProjection: number;
   monthlyProjection: number;
+  monthlyProjection31: number;
   lastScanIntervalHours: number;
   confidence: number;
   todayScanCount: number;
@@ -120,7 +121,6 @@ export default function DashboardPage() {
       startOfToday.setHours(0, 0, 0, 0);
 
       for (const m of meters) {
-        // Ambil 10 pindaian terakhir untuk pemfilteran interval valid
         const { data: readings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
@@ -128,7 +128,6 @@ export default function DashboardPage() {
           .order('created_at', { ascending: false })
           .limit(10);
 
-        // Ambil seluruh pindaian hari ini (diurutkan kronologis dari awal hari)
         const { data: todayReadings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, created_at')
@@ -137,7 +136,6 @@ export default function DashboardPage() {
           .order('created_at', { ascending: true });
 
         const scanCountToday = todayReadings?.length || 0;
-
         const formattedSessions: TodayScanSession[] = [];
         let actualDailyKwh = 0;
 
@@ -155,18 +153,15 @@ export default function DashboardPage() {
               }
             }
 
-            const sessionLabel = `Pindaian #${idx + 1}`;
-
             formattedSessions.push({
               id: r.id,
               time: timeStr,
               kwh: val,
               consumptionFromPrev: consumed,
-              sessionName: sessionLabel,
+              sessionName: `Pindaian #${idx + 1}`,
             });
           });
 
-          // HITUNG PEMAKAIAN RIIL HARI INI: Pindaian Pertama vs Pindaian Terakhir Hari Ini
           if (todayReadings.length >= 2) {
             const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
             const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
@@ -186,7 +181,7 @@ export default function DashboardPage() {
           avgMeterConfidence = Number(readings[0].confidence || 85);
         }
 
-        // PEMBARUAN LOGIKA LAJU PER JAM: Akumulasi Riil Hari Ini / Total Jam Hari Ini
+        // PERHITUNGAN LAJU PER JAM (AKUMULASI HARI INI)
         if (todayReadings && todayReadings.length >= 2) {
           const firstTime = new Date(todayReadings[0].created_at).getTime();
           const latestTime = new Date(todayReadings[todayReadings.length - 1].created_at).getTime();
@@ -197,7 +192,6 @@ export default function DashboardPage() {
             intervalHours = totalHoursToday;
           }
         } else if (readings && readings.length >= 2) {
-          // Fallback jika baru 1 pindaian hari ini
           const validReadings: typeof readings = [readings[0]];
           for (let i = 1; i < readings.length; i++) {
             const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
@@ -212,7 +206,6 @@ export default function DashboardPage() {
           if (validReadings.length >= 2) {
             const latest = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
             const previousValid = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
-
             const diffMs = new Date(validReadings[0].created_at).getTime() - new Date(validReadings[1].created_at).getTime();
             intervalHours = diffMs / (1000 * 60 * 60);
 
@@ -222,11 +215,11 @@ export default function DashboardPage() {
           }
         }
 
-        // PENYESUAIAN METRIK: Proyeksi berbasis pemakaian riil harian (Fallback ke laju * 24 jika pindaian < 2)
-        const dailyBaseForProjection = actualDailyKwh > 0 ? actualDailyKwh : hourlyRate * 24;
-        const dailyProj = dailyBaseForProjection;
-        const weeklyProj = dailyBaseForProjection * 7;
-        const monthlyProj = dailyBaseForProjection * 30;
+        // PROYEKSI SESUAI FORMULA EXCEL: LAJU PER JAM * 24 JAM
+        const dailyProj = hourlyRate > 0 ? hourlyRate * 24 : actualDailyKwh;
+        const weeklyProj = dailyProj * 7;
+        const monthlyProj30 = dailyProj * 30;
+        const monthlyProj31 = dailyProj * 31;
 
         const storePowerVa = m.power_va || 1300;
 
@@ -240,7 +233,8 @@ export default function DashboardPage() {
           actualDailyKwh,
           dailyProjection: dailyProj,
           weeklyProjection: weeklyProj,
-          monthlyProjection: monthlyProj,
+          monthlyProjection: monthlyProj30,
+          monthlyProjection31: monthlyProj31,
           lastScanIntervalHours: intervalHours,
           confidence: avgMeterConfidence,
           todayScanCount: scanCountToday,
@@ -308,7 +302,6 @@ export default function DashboardPage() {
 
   const displayHourlyRate = filteredMeters.reduce((acc, curr) => acc + curr.hourlyRate, 0);
 
-  // Perhitungan Estimasi Habis berdasarkan Total Pemakaian Riil Harian
   const totalDailyKwh = filteredMeters.reduce((acc, curr) => acc + curr.dailyProjection, 0);
   const displayDaysLeft = totalDailyKwh > 0 ? Math.max(0, Math.floor(displayTokenKwh / totalDailyKwh)) : 0;
 
@@ -412,7 +405,7 @@ export default function DashboardPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          {/* KOLOM KIRI (2 SPAN PADA DESKTOP) */}
+          {/* KOLOM KIRI (2 SPAN DESKTOP) */}
           <div className="lg:col-span-2 space-y-6">
             
             {/* Card Score & Status Scan */}
@@ -529,44 +522,64 @@ export default function DashboardPage() {
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3 text-xs">
+                      {/* TAMPILAN SESUAI KONSEP EXCEL */}
+                      <div className="grid grid-cols-3 gap-3 text-xs">
                         <div className="bg-slate-50 p-3 rounded-xl">
-                          <span className="text-slate-500 block text-xs">Sisa Meteran</span>
-                          <span className="font-extrabold text-slate-800 text-base">
+                          <span className="text-slate-500 block text-[11px] font-medium">Sisa Meteran</span>
+                          <span className="font-extrabold text-slate-800 text-base block mt-0.5">
                             {m.lastReading !== null ? `${m.lastReading.toFixed(1)} kWh` : 'Belum Scan'}
                           </span>
                           {m.lastReading !== null && (
-                            <span className="block text-xs text-slate-400 mt-0.5">
+                            <span className="block text-[10px] text-slate-400 mt-0.5 font-mono">
                               ~ Rp {Math.round(storeEstimatedRupiah).toLocaleString('id-ID')}
                             </span>
                           )}
                         </div>
-                        <div className="bg-teal-50 p-3 rounded-xl">
-                          <span className="text-teal-700 block text-xs flex items-center gap-1 font-semibold">
+
+                        <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-100">
+                          <span className="text-amber-800 block text-[11px] font-bold">Terpakai Hari Ini</span>
+                          <span className="font-extrabold text-amber-900 text-base block mt-0.5">
+                            {m.actualDailyKwh.toFixed(1)} kWh
+                          </span>
+                          <span className="text-[10px] text-amber-700 block mt-0.5 font-medium">Jam Berjalan</span>
+                        </div>
+
+                        <div className="bg-teal-50 p-3 rounded-xl border border-teal-100">
+                          <span className="text-teal-700 block text-[11px] font-bold flex items-center gap-1">
                             <Clock className="w-3.5 h-3.5" /> Pemakaian Rata-Rata
                           </span>
-                          <span className="font-extrabold text-teal-900 text-base">
+                          <span className="font-extrabold text-teal-900 text-base block mt-0.5">
                             {m.hourlyRate.toFixed(2)} kWh/jam
                           </span>
                         </div>
                       </div>
 
-                      <div className="bg-slate-100/70 p-3 rounded-xl grid grid-cols-3 gap-2 text-center text-xs">
-                        <div>
-                          <span className="text-slate-500 block text-[10px] uppercase font-bold">
-                            {m.actualDailyKwh > 0 ? 'Terpakai Hari Ini' : 'Estimasi Sehari'}
-                          </span>
-                          <span className="font-extrabold text-slate-800">{m.dailyProjection.toFixed(1)} kWh</span>
-                        </div>
-                        <div className="border-x border-slate-200">
-                          <span className="text-slate-500 block text-[9px] uppercase font-bold">Seminggu</span>
-                          <span className="font-extrabold text-slate-800">{m.weeklyProjection.toFixed(1)} kWh</span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block text-[9px] uppercase font-bold">Sebulan (30h)</span>
-                          <span className="font-extrabold text-slate-800">{m.monthlyProjection.toFixed(1)} kWh</span>
+                      {/* BLOK DATA ESTIMASI PROYEKSI */}
+                      <div className="bg-slate-100/80 p-3.5 rounded-xl space-y-2">
+                        <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider">
+                          Data Estimasi
+                        </span>
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div>
+                            <span className="text-slate-500 block text-[10px] font-bold uppercase">Harian</span>
+                            <span className="font-extrabold text-slate-800">{m.dailyProjection.toFixed(2)} kWh</span>
+                          </div>
+                          <div className="border-x border-slate-200">
+                            <span className="text-slate-500 block text-[10px] font-bold uppercase">Mingguan</span>
+                            <span className="font-extrabold text-slate-800">{m.weeklyProjection.toFixed(2)} kWh</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block text-[10px] font-bold uppercase">Bulanan</span>
+                            <span className="font-extrabold text-slate-800 block">
+                              {m.monthlyProjection.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(30h)</span>
+                            </span>
+                            <span className="font-extrabold text-slate-800 block mt-0.5">
+                              {m.monthlyProjection31.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(31h)</span>
+                            </span>
+                          </div>
                         </div>
                       </div>
+
                     </CardContent>
                   </Card>
                 );
@@ -577,7 +590,7 @@ export default function DashboardPage() {
           {/* KOLOM KANAN (DESKTOP SIDEBAR 1 SPAN) */}
           <div className="space-y-6">
             
-            {/* RIWAYAT PINDAIAN HARI INI (TIME-SERIES LOG) */}
+            {/* RIWAYAT PINDAIAN HARI INI */}
             {filteredMeters.map((m) => (
               <Card key={`sessions-${m.id}`} className="border-teal-200 bg-teal-50/30 shadow-sm">
                 <CardHeader className="pb-2 pt-4 px-5">
@@ -634,10 +647,10 @@ export default function DashboardPage() {
                 <p className="leading-relaxed">
                   Rata-rata konsumsi listrik {isAllMode ? 'gabungan seluruh toko' : 'toko ini'} saat ini adalah{' '}
                   <strong>{displayHourlyRate.toFixed(2)} kWh/jam</strong> (dengan akumulasi riil hari ini{' '}
-                  <strong>{totalDailyKwh.toFixed(1)} kWh</strong>).
+                  <strong>{filteredMeters.reduce((acc, curr) => acc + curr.actualDailyKwh, 0).toFixed(1)} kWh</strong>).
                 </p>
                 <div className="p-3 bg-white rounded-xl border border-teal-100 text-xs text-teal-800 leading-relaxed">
-                  💡 <strong>Rekomendasi Pembelian Token:</strong> Proyeksi bulanan toko disarankan menyiapkan sekitar <strong>{(totalDailyKwh * 30).toFixed(0)} kWh</strong> per bulan untuk menjaga kelancaran operasional toko.
+                  💡 <strong>Rekomendasi Pembelian Token:</strong> Proyeksi bulanan toko disarankan menyiapkan sekitar <strong>{(displayHourlyRate * 24 * 30).toFixed(0)} kWh</strong> per bulan untuk menjaga kelancaran operasional toko.
                 </div>
               </CardContent>
             </Card>
