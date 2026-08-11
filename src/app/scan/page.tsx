@@ -211,6 +211,12 @@ export default function ScanPage() {
 
       const now = new Date();
 
+      // PEMBARUAN FORMAT WAKTU AGAR COMPATIBLE DENGAN TYPE TIME POSTGRESQL ("HH:mm:ss")
+      const hours = String(now.getHours()).padStart(2, '0');
+      const minutes = String(now.getMinutes()).padStart(2, '0');
+      const seconds = String(now.getSeconds()).padStart(2, '0');
+      const validTimeString = `${hours}:${minutes}:${seconds}`;
+
       const payload = {
         meter_id: meterId,
         meter_value: finalKwh,
@@ -219,7 +225,7 @@ export default function ScanPage() {
         status: 'success',
         image_url: uploadedImageUrl,
         reading_date: now.toISOString().slice(0, 10),
-        reading_time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        reading_time: validTimeString, // Menggunakan format HH:mm:ss dengan titik dua
         created_at: now.toISOString(),
       };
 
