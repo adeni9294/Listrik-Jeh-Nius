@@ -61,8 +61,7 @@ interface StoreAnalysisItem {
   actualDailyKwh: number;
   dailyProjection: number;
   weeklyProjection: number;
-  monthlyProjection30: number;
-  monthlyProjection31: number;
+  monthlyProjectionNextMonth: number;
   latestKwh: number;
   daysRemaining: number;
   monthlyCost: number;
@@ -71,6 +70,19 @@ interface StoreAnalysisItem {
   todaySessions: TodayScanSession[];
   weeklyTrend: DailyTrend[];
 }
+
+// FUNGSI UTAMA: MENGAMBIL NAMA BULAN DEPAN & JUMLAH HARINYA SECARA OTOMATIS
+const getNextMonthInfo = () => {
+  const now = new Date();
+  // Tanggal 1 pada bulan berikutnya (otomatis menyesuaikan jika pergantian tahun Des -> Jan)
+  const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  
+  const monthName = nextMonthDate.toLocaleDateString('id-ID', { month: 'long' });
+  // Mengambil tanggal terakhir di bulan berikutnya untuk jumlah hari yang presisi (misal: 28, 30, atau 31)
+  const daysInNextMonth = new Date(nextMonthDate.getFullYear(), nextMonthDate.getMonth() + 1, 0).getDate();
+
+  return { monthName, daysInNextMonth };
+};
 
 export default function AnalysisPage() {
   const supabase = createClient();
@@ -86,9 +98,11 @@ export default function AnalysisPage() {
   const [hourlyRate, setHourlyRate] = useState<number>(0);
   const [dailyEstKwh, setDailyEstKwh] = useState<number>(0);
   const [weeklyEstKwh, setWeeklyEstKwh] = useState<number>(0);
-  const [monthlyEstKwh30, setMonthlyEstKwh30] = useState<number>(0);
-  const [monthlyEstKwh31, setMonthlyEstKwh31] = useState<number>(0);
+  const [monthlyEstKwh, setMonthlyEstKwh] = useState<number>(0);
   const [monthlyEstCost, setMonthlyEstCost] = useState<number>(0);
+
+  const [nextMonthName, setNextMonthName] = useState<string>('');
+  const [nextMonthDays, setNextMonthDays] = useState<number>(30);
 
   const [isSpike, setIsSpike] = useState<boolean>(false);
   const [spikePercent, setSpikePercent] = useState<number>(0);
@@ -154,6 +168,8 @@ export default function AnalysisPage() {
 
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const { daysInNextMonth } = getNextMonthInfo();
 
       const detailedAnalysisList: StoreAnalysisItem[] = [];
       if (currentMeters.length > 0) {
@@ -227,13 +243,12 @@ export default function AnalysisPage() {
             });
           }
 
-          // ESTIMASI SESUAI RUMUS EXCEL: LAJU PER JAM * 24 JAM
+          // ESTIMASI DINAMIS BERDASARKAN HARI BULAN DEPAN
           const dailyProj = rate > 0 ? rate * 24 : actualDailyKwh;
           const weeklyProj = dailyProj * 7;
-          const monthlyProj30 = dailyProj * 30;
-          const monthlyProj31 = dailyProj * 31;
+          const monthlyProjNextMonth = dailyProj * daysInNextMonth;
 
-          const storeMonthlyCost = monthlyProj30 * storeTariff;
+          const storeMonthlyCost = monthlyProjNextMonth * storeTariff;
           const daysLeft = dailyProj > 0 ? Math.floor(latestKwh / dailyProj) : 99;
 
           detailedAnalysisList.push({
@@ -245,8 +260,7 @@ export default function AnalysisPage() {
             actualDailyKwh: actualDailyKwh,
             dailyProjection: dailyProj,
             weeklyProjection: weeklyProj,
-            monthlyProjection30: monthlyProj30,
-            monthlyProjection31: monthlyProj31,
+            monthlyProjectionNextMonth: monthlyProjNextMonth,
             latestKwh: latestKwh,
             daysRemaining: daysLeft,
             monthlyCost: storeMonthlyCost,
@@ -401,22 +415,25 @@ export default function AnalysisPage() {
     spikeDetected: boolean = false,
     spikePct: number = 0
   ) => {
+    const { monthName, daysInNextMonth } = getNextMonthInfo();
+
     const dailyEst = ratePerHour * 24;
     const weeklyEst = dailyEst * 7;
-    const monthlyKwh30 = dailyEst * 30;
-    const monthlyKwh31 = dailyEst * 31;
+    const monthlyKwh = dailyEst * daysInNextMonth;
 
     const tariff = getTariffRate(powerVa);
-    const monthlyCost = monthlyKwh30 * tariff;
+    const monthlyCost = monthlyKwh * tariff;
 
     setIsSpike(spikeDetected);
     setSpikePercent(spikePct);
 
+    setNextMonthName(monthName);
+    setNextMonthDays(daysInNextMonth);
+
     setHourlyRate(ratePerHour);
     setDailyEstKwh(dailyEst);
     setWeeklyEstKwh(weeklyEst);
-    setMonthlyEstKwh30(monthlyKwh30);
-    setMonthlyEstKwh31(monthlyKwh31);
+    setMonthlyEstKwh(monthlyKwh);
     setMonthlyEstCost(monthlyCost);
   };
 
@@ -439,7 +456,7 @@ export default function AnalysisPage() {
   const handleExportCSV = () => {
     if (storeAnalysisList.length === 0) return;
 
-    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Pemakaian Riil Hari Ini (kWh)', 'Estimasi Harian (kWh)', 'Estimasi Bulanan 30h (kWh)', 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
+    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Pemakaian Riil Hari Ini (kWh)', 'Estimasi Harian (kWh)', `Estimasi Bulan ${nextMonthName} (${nextMonthDays}h) (kWh)`, 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
     const rows = storeAnalysisList.map((item) => [
       `"${item.store_name}"`,
       `"${item.meter_number || '-'}"`,
@@ -447,7 +464,7 @@ export default function AnalysisPage() {
       item.hourlyRate.toFixed(2),
       item.actualDailyKwh.toFixed(1),
       item.dailyProjection.toFixed(2),
-      item.monthlyProjection30.toFixed(2),
+      item.monthlyProjectionNextMonth.toFixed(2),
       Math.round(item.monthlyCost),
       `"${item.daysRemaining <= 2 ? 'Kritis' : item.daysRemaining <= 5 ? 'Warning' : 'Aman'} (${item.daysRemaining} hari)"`,
     ]);
@@ -867,7 +884,7 @@ export default function AnalysisPage() {
                     <span className="text-[10px] font-bold uppercase">Beli Token</span>
                   </div>
                   <div className="text-base font-extrabold text-teal-100">
-                    {monthlyEstKwh30.toFixed(0)} <span className="text-[10px]">kWh</span>
+                    {monthlyEstKwh.toFixed(0)} <span className="text-[10px]">kWh</span>
                   </div>
                   <span className="text-[9px] text-teal-300 block font-mono">
                     ~ Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}
@@ -876,7 +893,7 @@ export default function AnalysisPage() {
               </Card>
             </div>
 
-            {/* BLOCK DATA ESTIMASI LENGKAP */}
+            {/* BLOCK DATA ESTIMASI LENGKAP - DINAMIS BULAN DEPAN */}
             <Card className="border-slate-200 bg-slate-100/80 shadow-xs">
               <CardContent className="p-4 space-y-2">
                 <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider text-center">
@@ -892,28 +909,27 @@ export default function AnalysisPage() {
                     <span className="font-extrabold text-slate-800">{weeklyEstKwh.toFixed(2)} kWh</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[10px] font-bold uppercase">Bulanan</span>
-                    <span className="font-extrabold text-slate-800 block">
-                      {monthlyEstKwh30.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(30h)</span>
+                    <span className="text-slate-500 block text-[10px] font-bold uppercase capitalize">
+                      {nextMonthName || 'Bulanan'} ({nextMonthDays}h)
                     </span>
-                    <span className="font-extrabold text-slate-800 block mt-0.5">
-                      {monthlyEstKwh31.toFixed(2)} kWh <span className="text-[9px] font-normal text-slate-500">(31h)</span>
+                    <span className="font-extrabold text-teal-800 block text-sm">
+                      {monthlyEstKwh.toFixed(2)} kWh
                     </span>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* AI Recommendation for Budget */}
+            {/* AI Recommendation for Budget - AUTOMATIC MONTH NAME */}
             <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
               <CardContent className="p-4 flex items-start gap-3">
                 <Cpu className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-700 space-y-1">
-                  <span className="font-bold text-teal-900 block">
-                    Anggaran Listrik Bulan Depan ({selectedStoreObj?.store_name}):
+                  <span className="font-bold text-teal-900 block capitalize">
+                    Anggaran Listrik Bulan {nextMonthName || 'Depan'} ({selectedStoreObj?.store_name}):
                   </span>
                   <p className="leading-relaxed">
-                    Siapkan estimasi token <strong>{monthlyEstKwh30.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan berdasarkan pola konsumsi riil harian.
+                    Siapkan estimasi token <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional {nextMonthDays} hari ke depan berdasarkan pola konsumsi riil harian.
                   </p>
                 </div>
               </CardContent>
