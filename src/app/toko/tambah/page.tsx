@@ -14,8 +14,6 @@ import {
   Eye,
   EyeOff,
   PlusCircle,
-  CheckCircle2,
-  Search,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -24,48 +22,11 @@ export default function TambahTokoPage() {
 
   const [storeName, setStoreName] = useState('');
   const [meterNumber, setMeterNumber] = useState('');
-  const [powerVa, setPowerVa] = useState('11000');
+  const [powerVa, setPowerVa] = useState('33000');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successInfo, setSuccessInfo] = useState<string | null>(null);
-
-  // Fungsi untuk Cek Otomatis Daya & Data PLN
-  const handleCheckPlnMeter = async () => {
-    if (!meterNumber.trim()) {
-      setErrorMessage('Mohon masukkan Nomor Meter / ID Pelanggan terlebih dahulu.');
-      return;
-    }
-
-    setIsChecking(true);
-    setErrorMessage(null);
-    setSuccessInfo(null);
-
-    try {
-      const res = await fetch('/api/check-pln', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meterNumber: meterNumber.trim() }),
-      });
-
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || 'Gagal memverifikasi meteran.');
-      }
-
-      if (json.success && json.data) {
-        setPowerVa(json.data.powerVa.toString());
-        setSuccessInfo(`Berhasil terdeteksi: ${json.data.segment}`);
-      }
-    } catch (err: any) {
-      console.error('Error cek PLN:', err);
-      setErrorMessage(err.message || 'Terjadi kesalahan saat mengecek meteran PLN.');
-    } finally {
-      setIsChecking(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,13 +119,6 @@ export default function TambahTokoPage() {
             </div>
           )}
 
-          {successInfo && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm rounded-xl font-medium leading-relaxed flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{successInfo}</span>
-            </div>
-          )}
-
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Nama Toko */}
             <div>
@@ -181,37 +135,21 @@ export default function TambahTokoPage() {
               />
             </div>
 
-            {/* Nomor Meter PLN + Tombol Cek Otomatis */}
+            {/* Nomor Meter PLN (Tanpa Tombol Cek PLN Fiktif) */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
                 <CreditCard className="w-3.5 h-3.5 text-slate-400" /> Nomor Meter / ID Pelanggan PLN
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: 14028821992"
-                  value={meterNumber}
-                  onChange={(e) => setMeterNumber(e.target.value)}
-                  className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-mono text-slate-800"
-                />
-                <Button
-                  type="button"
-                  onClick={handleCheckPlnMeter}
-                  disabled={isChecking}
-                  className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 rounded-xl shrink-0 flex items-center gap-1.5"
-                >
-                  {isChecking ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Search className="w-3.5 h-3.5" /> Cek PLN
-                    </>
-                  )}
-                </Button>
-              </div>
+              <input
+                type="text"
+                required
+                placeholder="Contoh: 14028821992"
+                value={meterNumber}
+                onChange={(e) => setMeterNumber(e.target.value)}
+                className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-mono text-slate-800"
+              />
               <p className="text-[10px] text-slate-400 mt-1">
-                Tekan tombol Cek PLN untuk mendeteksi golongan daya secara otomatis.
+                Nomor meter fisik atau ID pelanggan yang terpasang di lokasi toko.
               </p>
             </div>
 
@@ -225,22 +163,21 @@ export default function TambahTokoPage() {
                 onChange={(e) => setPowerVa(e.target.value)}
                 className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:bg-white outline-none transition font-semibold text-slate-800"
               >
-                <optgroup label="Toko Modern / Minimarket (B2)">
-                  <option value="6600">6.600 VA (B2)</option>
-                  <option value="7700">7.700 VA (B2)</option>
-                  <option value="11000">11.000 VA / 11 kVA (B2)</option>
-                  <option value="13900">13.900 VA / 13,9 kVA (B2)</option>
-                  <option value="16500">16.500 VA / 16,5 kVA (B2)</option>
-                  <option value="22000">22.000 VA / 22 kVA (B2)</option>
-                  <option value="33000">33.000 VA / 33 kVA (B2)</option>
-                  <option value="41500">41.500 VA / 41,5 kVA (B2)</option>
+                <optgroup label="Bisnis / Menengah-Atas (Tegangan Rendah)">
+                  <option value="33000">33.000 VA / 33 kVA (B-3)</option>
+                  <option value="22000">22.000 VA / 22 kVA (B-2)</option>
+                  <option value="16500">16.500 VA / 16,5 kVA (B-2)</option>
+                  <option value="13900">13.900 VA / 13,9 kVA (B-2)</option>
+                  <option value="11000">11.000 VA / 11 kVA (B-2)</option>
+                  <option value="7700">7.700 VA (B-2)</option>
+                  <option value="6600">6.600 VA (B-2)</option>
                 </optgroup>
-                <optgroup label="Usaha Kecil / Kelontong (B1 / R1)">
-                  <option value="900">900 VA (R1 / B1)</option>
-                  <option value="1300">1.300 VA (R1 / B1)</option>
+                <optgroup label="Usaha Kecil / Kelontong & Rumah Tangga">
+                  <option value="5500">5.500 VA (B1 / R1)</option>
+                  <option value="3500">3.500 VA (B1 / R1)</option>
                   <option value="2200">2.200 VA (R1 / B1)</option>
-                  <option value="3500">3.500 VA (B1)</option>
-                  <option value="5500">5.500 VA (B1)</option>
+                  <option value="1300">1.300 VA (R1 / B1)</option>
+                  <option value="900">900 VA (R1 / B1)</option>
                 </optgroup>
               </select>
             </div>
