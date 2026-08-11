@@ -24,9 +24,6 @@ import {
   LogOut,
   LogIn,
   Lock,
-  Sun,
-  Sunset,
-  Moon,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -158,7 +155,8 @@ export default function AnalysisPage() {
                 }
               }
 
-              const sessionLabel = idx === 0 ? 'Pindaian 1 (Pagi/Buka)' : idx === 1 ? 'Pindaian 2 (Siang)' : `Pindaian ${idx + 1} (Malam/Tutup)`;
+              // Label berbasis urutan fleksibel
+              const sessionLabel = `Pindaian #${idx + 1}`;
 
               formattedSessions.push({
                 id: r.id,
@@ -626,7 +624,9 @@ export default function AnalysisPage() {
               <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
                 <CardHeader className="pb-2 pt-4 px-5">
                   <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                    <span>📊 Breakdown Pindaian Hari Ini ({selectedStoreObj.store_name})</span>
+                    <span className="flex items-center gap-1.5">
+                      <Activity className="w-4 h-4 text-teal-600" /> Breakdown Pindaian Hari Ini ({selectedStoreObj.store_name})
+                    </span>
                     <span className="text-[11px] text-teal-700 font-normal">
                       {selectedStoreObj.todaySessions?.length || 0}x Pindaian Sukses
                     </span>
@@ -636,22 +636,18 @@ export default function AnalysisPage() {
                   {!selectedStoreObj.todaySessions || selectedStoreObj.todaySessions.length === 0 ? (
                     <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
                   ) : (
-                    selectedStoreObj.todaySessions.map((s, idx) => (
+                    selectedStoreObj.todaySessions.map((s) => (
                       <div
                         key={s.id}
                         className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
                       >
                         <div className="flex items-center gap-2.5">
-                          {idx === 0 ? (
-                            <Sun className="w-4 h-4 text-amber-500" />
-                          ) : idx === 1 ? (
-                            <Sunset className="w-4 h-4 text-orange-500" />
-                          ) : (
-                            <Moon className="w-4 h-4 text-indigo-500" />
-                          )}
+                          <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
+                            <Clock className="w-4 h-4" />
+                          </div>
                           <div>
                             <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
-                            <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                            <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
                           </div>
                         </div>
 
