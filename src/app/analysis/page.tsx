@@ -40,6 +40,7 @@ interface Meter {
 interface TodayScanSession {
   id: string;
   time: string;
+  createdAt: string; // TAMBAHAN TIMESTAMP UNTUK HITUNG DURASI
   kwh: number;
   consumptionFromPrev: number | null;
   sessionName: string;
@@ -76,7 +77,6 @@ interface StoreAnalysisItem {
   monthlyTrend: MonthlyTrend[];
 }
 
-// FUNGSI UTAMA: MENGAMBIL NAMA BULAN DEPAN & JUMLAH HARINYA SECARA OTOMATIS
 const getNextMonthInfo = () => {
   const now = new Date();
   const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -98,7 +98,6 @@ export default function AnalysisPage() {
   const [storeAnalysisList, setStoreAnalysisList] = useState<StoreAnalysisItem[]>([]);
   const [selectedMeterId, setSelectedMeterId] = useState<string>('');
 
-  // STATE UNTUK PILIHAN GRAFIK (daily = 7 Hari, monthly = 6 Bulan)
   const [chartMode, setChartMode] = useState<'daily' | 'monthly'>('daily');
 
   const [hourlyRate, setHourlyRate] = useState<number>(0);
@@ -186,7 +185,6 @@ export default function AnalysisPage() {
           const { rate, latestKwh, actualDailyKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
 
-          // 1. DATA 7 HARI TERAKHIR
           const { data: weekReadings } = await supabase
             .from('meter_readings')
             .select('kwh, meter_value, created_at')
@@ -224,7 +222,6 @@ export default function AnalysisPage() {
             totalKwh: Number(value.total.toFixed(1)),
           }));
 
-          // 2. DATA 6 BULAN TERAKHIR
           const { data: monthReadings } = await supabase
             .from('meter_readings')
             .select('kwh, meter_value, created_at')
@@ -261,7 +258,6 @@ export default function AnalysisPage() {
             totalKwh: Number(item.total.toFixed(1)),
           }));
 
-          // BREAKDOWN PINDAIAN HARI INI
           const formattedSessions: TodayScanSession[] = [];
           const todayReadings = (weekReadings || []).filter(
             (r) => new Date(r.created_at) >= startOfToday
@@ -283,6 +279,7 @@ export default function AnalysisPage() {
               formattedSessions.push({
                 id: r.id || `session-${idx}`,
                 time: timeStr,
+                createdAt: r.created_at,
                 kwh: val,
                 consumptionFromPrev: consumed,
                 sessionName: `Pindaian #${idx + 1}`,
@@ -552,7 +549,6 @@ export default function AnalysisPage() {
 
   const selectedStoreObj = storeAnalysisList.find((m) => m.id === selectedMeterId) || storeAnalysisList[0];
 
-  // BATAS MAKSIMUM UNTUK SKALA GRAFIK
   const maxWeeklyTrendKwh = selectedStoreObj?.weeklyTrend ? Math.max(...selectedStoreObj.weeklyTrend.map((t) => t.totalKwh), 1) : 1;
   const maxMonthlyTrendKwh = selectedStoreObj?.monthlyTrend ? Math.max(...selectedStoreObj.monthlyTrend.map((t) => t.totalKwh), 1) : 1;
 
@@ -560,7 +556,6 @@ export default function AnalysisPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
-      {/* Header Actions */}
       <div className="flex justify-between items-start gap-2">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Analisis Pemakaian</h1>
@@ -643,7 +638,7 @@ export default function AnalysisPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             
-            {/* MATRIKS KONSUMSI SELURUH TOKO (EST. BULAN DEPAN: KWH & RUPIAH) */}
+            {/* MATRIKS KONSUMSI SELURUH TOKO */}
             {storeAnalysisList.length > 0 && (
               <Card className="border-slate-200 shadow-sm">
                 <CardHeader className="pb-3">
@@ -692,7 +687,6 @@ export default function AnalysisPage() {
                               {item.latestKwh.toFixed(1)}{' '}
                               <span className="text-[9px] font-normal text-slate-500">kWh</span>
                             </td>
-                            {/* EST. BULAN DEPAN: KWH & RUPIAH */}
                             <td className="px-3 py-3">
                               <span className="font-extrabold text-teal-900 block">
                                 {item.monthlyProjectionNextMonth.toFixed(1)} kWh
@@ -702,7 +696,6 @@ export default function AnalysisPage() {
                               </span>
                             </td>
                             <td className="px-3 py-3">{getStatusBadge(item.daysRemaining)}</td>
-                            {/* TOMBOL AKSI FUNGSIONAL */}
                             <td className="px-3 py-3 text-right">
                               <Button
                                 size="sm"
@@ -726,7 +719,7 @@ export default function AnalysisPage() {
               </Card>
             )}
 
-            {/* RIWAYAT TREN PEMAKAIAN (DENGAN DROPDOWN FILTER HARIAN / BULANAN & NOMINAL RUPIAH) */}
+            {/* RIWAYAT TREN PEMAKAIAN */}
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center justify-between text-slate-800">
@@ -738,7 +731,6 @@ export default function AnalysisPage() {
                     </span>
                   </div>
                   
-                  {/* DROPDOWN FILTER MODE GRAFIK */}
                   <select
                     value={chartMode}
                     onChange={(e) => setChartMode(e.target.value as 'daily' | 'monthly')}
@@ -751,7 +743,6 @@ export default function AnalysisPage() {
               </CardHeader>
 
               <CardContent className="pt-2">
-                {/* GRAFIK HARIAN (7 HARI TERAKHIR) */}
                 {chartMode === 'daily' && (
                   !selectedStoreObj?.weeklyTrend || selectedStoreObj.weeklyTrend.length === 0 ? (
                     <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian harian.</p>
@@ -763,7 +754,6 @@ export default function AnalysisPage() {
                           const dayCost = day.totalKwh * getTariffRate(selectedStoreObj.power_va || 1300);
                           return (
                             <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                              {/* LABEL KWH & RUPIAH HARIAN */}
                               <div className="text-center mb-1">
                                 <span className="text-[10px] font-bold text-slate-700 block leading-tight">
                                   {day.totalKwh > 0 ? `${day.totalKwh}` : '-'}
@@ -794,7 +784,6 @@ export default function AnalysisPage() {
                   )
                 )}
 
-                {/* GRAFIK BULANAN (6 BULAN TERAKHIR) */}
                 {chartMode === 'monthly' && (
                   !selectedStoreObj?.monthlyTrend || selectedStoreObj.monthlyTrend.length === 0 ? (
                     <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian bulanan.</p>
@@ -806,7 +795,6 @@ export default function AnalysisPage() {
                           const monthCost = month.totalKwh * getTariffRate(selectedStoreObj.power_va || 1300);
                           return (
                             <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                              {/* LABEL KWH & RUPIAH BULANAN */}
                               <div className="text-center mb-1">
                                 <span className="text-[10px] font-bold text-teal-800 block leading-tight">
                                   {month.totalKwh > 0 ? `${month.totalKwh} kWh` : '-'}
@@ -894,7 +882,6 @@ export default function AnalysisPage() {
           </div>
 
           <div className="space-y-6">
-            {/* BANNER PERINGATAN LONJAKAN */}
             {isSpike ? (
               <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl text-xs space-y-3 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -931,7 +918,7 @@ export default function AnalysisPage() {
               </div>
             )}
 
-            {/* TABEL PINDAIAN SESI HARI INI */}
+            {/* TABEL PINDAIAN SESI HARI INI DENGAN RATA-RATA PER JAM */}
             {selectedStoreObj && (
               <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
                 <CardHeader className="pb-2 pt-4 px-5">
@@ -948,37 +935,55 @@ export default function AnalysisPage() {
                   {!selectedStoreObj.todaySessions || selectedStoreObj.todaySessions.length === 0 ? (
                     <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
                   ) : (
-                    selectedStoreObj.todaySessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
-                            <Clock className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
-                            <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
-                          </div>
-                        </div>
+                    selectedStoreObj.todaySessions.map((s, idx, arr) => {
+                      let sessionHourlyRate = 0;
+                      if (idx > 0 && s.consumptionFromPrev !== null && s.consumptionFromPrev > 0) {
+                        const prevTime = new Date(arr[idx - 1].createdAt).getTime();
+                        const currTime = new Date(s.createdAt).getTime();
+                        const diffHours = (currTime - prevTime) / (1000 * 60 * 60);
+                        if (diffHours > 0) {
+                          sessionHourlyRate = s.consumptionFromPrev / diffHours;
+                        }
+                      }
 
-                        <div className="text-right">
-                          <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
-                          {s.consumptionFromPrev !== null && (
-                            <span className="text-[10px] text-rose-600 font-bold block">
-                              Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
-                            </span>
-                          )}
+                      return (
+                        <div
+                          key={s.id}
+                          className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
+                              <Clock className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
+                              <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                            {s.consumptionFromPrev !== null && (
+                              <>
+                                <span className="text-[10px] text-rose-600 font-bold block">
+                                  Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                                </span>
+                                {sessionHourlyRate > 0 && (
+                                  <span className="text-[9px] text-slate-500 font-mono block">
+                                    (~{sessionHourlyRate.toFixed(2)} kWh/jam)
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </CardContent>
               </Card>
             )}
 
-            {/* OVERVIEW METRIK BERSESUAIAN EXCEL */}
             <div className="grid grid-cols-3 gap-2.5">
               <Card className={`border-slate-200 ${isSpike ? 'bg-rose-50/50 border-rose-300' : 'bg-slate-50'}`}>
                 <CardContent className="p-3 text-center">
@@ -1022,7 +1027,6 @@ export default function AnalysisPage() {
               </Card>
             </div>
 
-            {/* BLOCK DATA ESTIMASI LENGKAP - DINAMIS BULAN DEPAN */}
             <Card className="border-slate-200 bg-slate-100/80 shadow-xs">
               <CardContent className="p-4 space-y-2">
                 <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider text-center">
@@ -1049,7 +1053,6 @@ export default function AnalysisPage() {
               </CardContent>
             </Card>
 
-            {/* AI Recommendation for Budget - AUTOMATIC MONTH NAME */}
             <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
               <CardContent className="p-4 flex items-start gap-3">
                 <Cpu className="w-5 h-5 text-teal-700 shrink-0 mt-0.5" />
