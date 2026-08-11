@@ -58,6 +58,7 @@ interface StoreAnalysisItem {
   meter_number: string;
   power_va: number;
   hourlyRate: number;
+  actualDailyKwh: number;
   latestKwh: number;
   daysRemaining: number;
   monthlyCost: number;
@@ -109,7 +110,13 @@ export default function AnalysisPage() {
     setSelectedMeterId(storeId);
     const targetStore = storeAnalysisList.find((m) => m.id === storeId);
     if (targetStore) {
-      applyMetrics(targetStore.hourlyRate, targetStore.monthlyCost, targetStore.isSpikeDetected, targetStore.spikePercent);
+      applyMetrics(
+        targetStore.hourlyRate,
+        targetStore.actualDailyKwh,
+        targetStore.power_va,
+        targetStore.isSpikeDetected,
+        targetStore.spikePercent
+      );
     }
   };
 
@@ -149,12 +156,8 @@ export default function AnalysisPage() {
         for (const m of currentMeters) {
           const { rate, latestKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
-          const storeMonthlyCost = rate * 24 * 30 * storeTariff;
 
-          const dailyKwh = rate * 24;
-          const daysLeft = dailyKwh > 0 ? Math.floor(latestKwh / dailyKwh) : 99;
-
-          // Ambil pindaian 7 hari terakhir untuk tren
+          // Ambil pindaian 7 hari terakhir untuk tren & riwayat pindaian
           const { data: weekReadings } = await supabase
             .from('meter_readings')
             .select('kwh, meter_value, created_at')
@@ -200,6 +203,8 @@ export default function AnalysisPage() {
             (r) => new Date(r.created_at) >= startOfToday
           );
 
+          let actualDailyKwh = 0;
+
           if (todayReadings.length > 0) {
             todayReadings.forEach((r: any, idx: number) => {
               const val = Number(r.meter_value ?? r.kwh ?? 0);
@@ -221,7 +226,21 @@ export default function AnalysisPage() {
                 sessionName: `Pindaian #${idx + 1}`,
               });
             });
+
+            // PEMAKAIAN RIIL HARI INI: Pindaian Pertama vs Pindaian Terakhir Hari Ini
+            if (todayReadings.length >= 2) {
+              const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
+              const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
+              if (firstValToday >= latestValToday) {
+                actualDailyKwh = firstValToday - latestValToday;
+              }
+            }
           }
+
+          // Gunakan pemakaian riil harian (fallback ke rate * 24 jika pindaian < 2)
+          const effectiveDailyKwh = actualDailyKwh > 0 ? actualDailyKwh : rate * 24;
+          const storeMonthlyCost = effectiveDailyKwh * 30 * storeTariff;
+          const daysLeft = effectiveDailyKwh > 0 ? Math.floor(latestKwh / effectiveDailyKwh) : 99;
 
           detailedAnalysisList.push({
             id: m.id,
@@ -229,6 +248,7 @@ export default function AnalysisPage() {
             meter_number: m.meter_number,
             power_va: m.power_va || 1300,
             hourlyRate: rate,
+            actualDailyKwh: actualDailyKwh,
             latestKwh: latestKwh,
             daysRemaining: daysLeft,
             monthlyCost: storeMonthlyCost,
@@ -254,13 +274,23 @@ export default function AnalysisPage() {
       const activeItem = detailedAnalysisList.find((m) => m.id === targetMeterId);
 
       if (activeItem) {
-        applyMetrics(activeItem.hourlyRate, activeItem.monthlyCost, activeItem.isSpikeDetected, activeItem.spikePercent);
+        applyMetrics(
+          activeItem.hourlyRate,
+          activeItem.actualDailyKwh,
+          activeItem.power_va,
+          activeItem.isSpikeDetected,
+          activeItem.spikePercent
+        );
       } else if (targetMeterId) {
         const rateData = await calculateRateAndReadingForMeter(targetMeterId);
         const activeMeter = currentMeters.find((m) => m.id === targetMeterId);
-        const tariff = getTariffRate(activeMeter?.power_va || 1300);
-        const monthlyCost = rateData.rate * 24 * 30 * tariff;
-        applyMetrics(rateData.rate, monthlyCost, rateData.isSpikeDetected, rateData.spikePercent);
+        applyMetrics(
+          rateData.rate,
+          0,
+          activeMeter?.power_va || 1300,
+          rateData.isSpikeDetected,
+          rateData.spikePercent
+        );
       }
     } catch (err: any) {
       console.error('Gagal mengambil data analisis:', err?.message || err);
@@ -269,7 +299,7 @@ export default function AnalysisPage() {
     }
   };
 
-  // PEMBARUAN LOGIKA: Filter Jarak Minimal (5 Menit) & Pembandingan Laju Antar-Interval
+  // Filter Jarak Minimal (5 Menit) & Pembandingan Laju Antar-Interval
   const calculateRateAndReadingForMeter = async (
     meterId: string
   ): Promise<{ rate: number; latestKwh: number; isSpikeDetected: boolean; spikePercent: number }> => {
@@ -278,7 +308,7 @@ export default function AnalysisPage() {
       .select('kwh, meter_value, created_at')
       .eq('meter_id', meterId)
       .order('created_at', { ascending: false })
-      .limit(10); // Ambil lebih banyak pindaian untuk memfilter pindaian yang terlalu dekat
+      .limit(10);
 
     if (!readings || readings.length === 0) {
       return { rate: 0, latestKwh: 0, isSpikeDetected: false, spikePercent: 0 };
@@ -289,14 +319,13 @@ export default function AnalysisPage() {
       return { rate: 0, latestKwh: latestVal, isSpikeDetected: false, spikePercent: 0 };
     }
 
-    // Filter pindaian yang memiliki selisih waktu minimal 5 menit dari pindaian sebelumnya
     const validReadings: typeof readings = [readings[0]];
     for (let i = 1; i < readings.length; i++) {
       const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
       const currTime = new Date(readings[i].created_at).getTime();
       const diffMinutes = (prevTime - currTime) / (1000 * 60);
 
-      if (diffMinutes >= 5) { // Syarat minimal 5 menit
+      if (diffMinutes >= 5) {
         validReadings.push(readings[i]);
       }
     }
@@ -305,7 +334,6 @@ export default function AnalysisPage() {
       return { rate: 0, latestKwh: latestVal, isSpikeDetected: false, spikePercent: 0 };
     }
 
-    // Interval Terbaru (Laju 2)
     const val1 = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
     const val2 = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
     const time1 = new Date(validReadings[0].created_at).getTime();
@@ -318,7 +346,6 @@ export default function AnalysisPage() {
     let isSpike = false;
     let spikePct = 0;
 
-    // Interval Sebelumnya (Laju 1)
     if (validReadings.length >= 3) {
       const val3 = Number(validReadings[2].meter_value ?? validReadings[2].kwh ?? 0);
       const time3 = new Date(validReadings[2].created_at).getTime();
@@ -329,7 +356,7 @@ export default function AnalysisPage() {
 
       if (prevRate > 0 && currentRate > prevRate) {
         spikePct = Math.round(((currentRate - prevRate) / prevRate) * 100);
-        if (spikePct >= 25) { // Ambang batas lonjakan 25%
+        if (spikePct >= 25) {
           isSpike = true;
         }
       }
@@ -343,9 +370,18 @@ export default function AnalysisPage() {
     };
   };
 
-  const applyMetrics = (ratePerHour: number, calculatedMonthlyCost: number, spikeDetected: boolean = false, spikePct: number = 0) => {
-    const daily = ratePerHour * 24;
+  const applyMetrics = (
+    ratePerHour: number,
+    realDailyKwh: number = 0,
+    powerVa: number = 1300,
+    spikeDetected: boolean = false,
+    spikePct: number = 0
+  ) => {
+    // Jika data riil hari ini ada, gunakan data riil. Jika belum, gunakan proyeksi laju * 24.
+    const daily = realDailyKwh > 0 ? realDailyKwh : ratePerHour * 24;
     const monthlyKwh = daily * 30;
+    const tariff = getTariffRate(powerVa);
+    const monthlyCost = monthlyKwh * tariff;
 
     setIsSpike(spikeDetected);
     setSpikePercent(spikePct);
@@ -353,7 +389,7 @@ export default function AnalysisPage() {
     setHourlyRate(ratePerHour);
     setDailyAvgKwh(daily);
     setMonthlyEstKwh(monthlyKwh);
-    setMonthlyEstCost(calculatedMonthlyCost);
+    setMonthlyEstCost(monthlyCost);
   };
 
   const handleLogout = async () => {
@@ -375,12 +411,13 @@ export default function AnalysisPage() {
   const handleExportCSV = () => {
     if (storeAnalysisList.length === 0) return;
 
-    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
+    const headers = ['Nama Toko', 'Nomor Meter PLN', 'Daya (VA)', 'Laju Konsumsi (kWh/jam)', 'Pemakaian Riil Hari Ini (kWh)', 'Estimasi Biaya Bulanan (Rp)', 'Status Sisa Token'];
     const rows = storeAnalysisList.map((item) => [
       `"${item.store_name}"`,
       `"${item.meter_number || '-'}"`,
       item.power_va,
       item.hourlyRate.toFixed(2),
+      item.actualDailyKwh.toFixed(1),
       Math.round(item.monthlyCost),
       `"${item.daysRemaining <= 2 ? 'Kritis' : item.daysRemaining <= 5 ? 'Warning' : 'Aman'} (${item.daysRemaining} hari)"`,
     ]);
@@ -532,7 +569,7 @@ export default function AnalysisPage() {
                         <tr>
                           <th className="px-3 py-2.5 rounded-l-md">Toko</th>
                           <th className="px-3 py-2.5">Daya</th>
-                          <th className="px-3 py-2.5">Rata-Rata</th>
+                          <th className="px-3 py-2.5">Laju Per Jam</th>
                           <th className="px-3 py-2.5">Status Risiko</th>
                           <th className="px-3 py-2.5 rounded-r-md text-right">Aksi</th>
                         </tr>
@@ -790,7 +827,9 @@ export default function AnalysisPage() {
                   <div className="text-base font-extrabold text-slate-800">
                     {dailyAvgKwh.toFixed(1)}
                   </div>
-                  <span className="text-[9px] text-slate-500">kWh/24j</span>
+                  <span className="text-[9px] text-slate-500">
+                    {selectedStoreObj?.actualDailyKwh && selectedStoreObj.actualDailyKwh > 0 ? 'kWh Riil Hari Ini' : 'kWh/24j'}
+                  </span>
                 </CardContent>
               </Card>
 
@@ -819,7 +858,7 @@ export default function AnalysisPage() {
                     Anggaran Listrik Bulan Depan ({selectedStoreObj?.store_name}):
                   </span>
                   <p className="leading-relaxed">
-                    Siapkan estimasi token <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan.
+                    Siapkan estimasi token <strong>{monthlyEstKwh.toFixed(0)} kWh</strong> atau sekitar <strong>Rp {Math.round(monthlyEstCost).toLocaleString('id-ID')}</strong> untuk operasional 30 hari ke depan berdasarkan pola konsumsi riil harian.
                   </p>
                 </div>
               </CardContent>
