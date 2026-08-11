@@ -719,7 +719,7 @@ export default function AnalysisPage() {
               </Card>
             )}
 
-            {/* RIWAYAT TREN PEMAKAIAN (DENGAN DROPDOWN FILTER HARIAN / BULANAN) */}
+            {/* RIWAYAT TREN PEMAKAIAN (DENGAN DROPDOWN FILTER HARIAN / BULANAN & NOMINAL RUPIAH) */}
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center justify-between text-slate-800">
@@ -750,14 +750,24 @@ export default function AnalysisPage() {
                     <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian harian.</p>
                   ) : (
                     <div className="space-y-3">
-                      <div className="grid grid-cols-7 gap-2 items-end h-32 pt-4 pb-2 border-b border-slate-100">
+                      <div className="grid grid-cols-7 gap-2 items-end h-36 pt-6 pb-2 border-b border-slate-100">
                         {selectedStoreObj.weeklyTrend.map((day, idx) => {
                           const barHeight = maxWeeklyTrendKwh > 0 ? (day.totalKwh / maxWeeklyTrendKwh) * 100 : 0;
+                          const dayCost = day.totalKwh * getTariffRate(selectedStoreObj.power_va || 1300);
                           return (
                             <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                              <span className="text-[10px] font-bold text-slate-700 mb-1">
-                                {day.totalKwh > 0 ? `${day.totalKwh}` : '-'}
-                              </span>
+                              {/* LABEL KWH & RUPIAH HARIAN */}
+                              <div className="text-center mb-1">
+                                <span className="text-[10px] font-bold text-slate-700 block leading-tight">
+                                  {day.totalKwh > 0 ? `${day.totalKwh}` : '-'}
+                                </span>
+                                {day.totalKwh > 0 && (
+                                  <span className="text-[8px] font-semibold text-slate-400 block font-mono">
+                                    ~Rp {Math.round(dayCost).toLocaleString('id-ID')}
+                                  </span>
+                                )}
+                              </div>
+
                               <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[28px]">
                                 <div
                                   className="w-full bg-teal-600 group-hover:bg-teal-700 transition-all duration-500 rounded-t-md"
@@ -783,15 +793,25 @@ export default function AnalysisPage() {
                     <p className="text-xs text-slate-400 italic py-4 text-center">Belum ada data tren pindaian bulanan.</p>
                   ) : (
                     <div className="space-y-3">
-                      <div className="grid grid-cols-6 gap-3 items-end h-32 pt-4 pb-2 border-b border-slate-100">
+                      <div className="grid grid-cols-6 gap-3 items-end h-36 pt-6 pb-2 border-b border-slate-100">
                         {selectedStoreObj.monthlyTrend.map((month, idx) => {
                           const barHeight = maxMonthlyTrendKwh > 0 ? (month.totalKwh / maxMonthlyTrendKwh) * 100 : 0;
+                          const monthCost = month.totalKwh * getTariffRate(selectedStoreObj.power_va || 1300);
                           return (
                             <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                              <span className="text-[10px] font-bold text-teal-800 mb-1">
-                                {month.totalKwh > 0 ? `${month.totalKwh}` : '-'}
-                              </span>
-                              <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[34px]">
+                              {/* LABEL KWH & RUPIAH BULANAN */}
+                              <div className="text-center mb-1">
+                                <span className="text-[10px] font-bold text-teal-800 block leading-tight">
+                                  {month.totalKwh > 0 ? `${month.totalKwh} kWh` : '-'}
+                                </span>
+                                {month.totalKwh > 0 && (
+                                  <span className="text-[9px] font-extrabold text-teal-600 block font-mono">
+                                    ~Rp {Math.round(monthCost).toLocaleString('id-ID')}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="w-full bg-slate-100 rounded-t-md h-full flex items-end overflow-hidden max-w-[36px]">
                                 <div
                                   className="w-full bg-teal-700 group-hover:bg-teal-800 transition-all duration-500 rounded-t-md"
                                   style={{ height: `${Math.max(barHeight, 5)}%` }}
@@ -803,7 +823,7 @@ export default function AnalysisPage() {
                         })}
                       </div>
                       <p className="text-[11px] text-slate-500 text-center font-medium pt-1">
-                        * Total akumulasi pemakaian kWh riil dalam kurun waktu 6 bulan terakhir.
+                        * Total akumulasi pemakaian kWh riil & estimasi biaya dalam kurun waktu 6 bulan terakhir.
                       </p>
                     </div>
                   )
