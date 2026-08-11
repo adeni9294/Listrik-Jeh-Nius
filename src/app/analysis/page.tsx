@@ -269,7 +269,7 @@ export default function AnalysisPage() {
     }
   };
 
-  // PEMBARUAN LOGIKA: Analisis Anomali Antar-Pindaian Berurutan
+  // PEMBARUAN LOGIKA: Filter Jarak Minimal (5 Menit) & Pembandingan Laju Antar-Interval
   const calculateRateAndReadingForMeter = async (
     meterId: string
   ): Promise<{ rate: number; latestKwh: number; isSpikeDetected: boolean; spikePercent: number }> => {
@@ -278,40 +278,58 @@ export default function AnalysisPage() {
       .select('kwh, meter_value, created_at')
       .eq('meter_id', meterId)
       .order('created_at', { ascending: false })
-      .limit(3);
+      .limit(10); // Ambil lebih banyak pindaian untuk memfilter pindaian yang terlalu dekat
 
     if (!readings || readings.length === 0) {
       return { rate: 0, latestKwh: 0, isSpikeDetected: false, spikePercent: 0 };
     }
 
-    const val1 = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
+    const latestVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
     if (readings.length < 2) {
-      return { rate: 0, latestKwh: val1, isSpikeDetected: false, spikePercent: 0 };
+      return { rate: 0, latestKwh: latestVal, isSpikeDetected: false, spikePercent: 0 };
     }
 
-    const val2 = Number(readings[1].meter_value ?? readings[1].kwh ?? 0);
-    const time1 = new Date(readings[0].created_at).getTime();
-    const time2 = new Date(readings[1].created_at).getTime();
-    const hoursLatest = Math.max((time1 - time2) / (1000 * 60 * 60), 0.0083);
+    // Filter pindaian yang memiliki selisih waktu minimal 5 menit dari pindaian sebelumnya
+    const validReadings: typeof readings = [readings[0]];
+    for (let i = 1; i < readings.length; i++) {
+      const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
+      const currTime = new Date(readings[i].created_at).getTime();
+      const diffMinutes = (prevTime - currTime) / (1000 * 60);
+
+      if (diffMinutes >= 5) { // Syarat minimal 5 menit
+        validReadings.push(readings[i]);
+      }
+    }
+
+    if (validReadings.length < 2) {
+      return { rate: 0, latestKwh: latestVal, isSpikeDetected: false, spikePercent: 0 };
+    }
+
+    // Interval Terbaru (Laju 2)
+    const val1 = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
+    const val2 = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
+    const time1 = new Date(validReadings[0].created_at).getTime();
+    const time2 = new Date(validReadings[1].created_at).getTime();
+    const hoursLatest = (time1 - time2) / (1000 * 60 * 60);
 
     const consumedLatest = val2 >= val1 ? val2 - val1 : 0;
-    const currentRate = consumedLatest / hoursLatest;
+    const currentRate = hoursLatest > 0 ? consumedLatest / hoursLatest : 0;
 
     let isSpike = false;
     let spikePct = 0;
 
-    // Jika ada pindaian ke-3, bandingkan laju pindaian terbaru vs pindaian sebelumnya
-    if (readings.length >= 3) {
-      const val3 = Number(readings[2].meter_value ?? readings[2].kwh ?? 0);
-      const time3 = new Date(readings[2].created_at).getTime();
-      const hoursPrev = Math.max((time2 - time3) / (1000 * 60 * 60), 0.0083);
+    // Interval Sebelumnya (Laju 1)
+    if (validReadings.length >= 3) {
+      const val3 = Number(validReadings[2].meter_value ?? validReadings[2].kwh ?? 0);
+      const time3 = new Date(validReadings[2].created_at).getTime();
+      const hoursPrev = (time2 - time3) / (1000 * 60 * 60);
 
       const consumedPrev = val3 >= val2 ? val3 - val2 : 0;
-      const prevRate = consumedPrev / hoursPrev;
+      const prevRate = hoursPrev > 0 ? consumedPrev / hoursPrev : 0;
 
       if (prevRate > 0 && currentRate > prevRate) {
         spikePct = Math.round(((currentRate - prevRate) / prevRate) * 100);
-        if (spikePct >= 25) { // Toleransi kenaikan laju 25%
+        if (spikePct >= 25) { // Ambang batas lonjakan 25%
           isSpike = true;
         }
       }
@@ -319,7 +337,7 @@ export default function AnalysisPage() {
 
     return {
       rate: currentRate,
-      latestKwh: val1,
+      latestKwh: latestVal,
       isSpikeDetected: isSpike,
       spikePercent: spikePct,
     };
