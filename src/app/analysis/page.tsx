@@ -61,6 +61,8 @@ interface StoreAnalysisItem {
   latestKwh: number;
   daysRemaining: number;
   monthlyCost: number;
+  isSpikeDetected: boolean;
+  spikePercent: number;
   todaySessions: TodayScanSession[];
   weeklyTrend: DailyTrend[];
 }
@@ -83,8 +85,6 @@ export default function AnalysisPage() {
 
   const [isSpike, setIsSpike] = useState<boolean>(false);
   const [spikePercent, setSpikePercent] = useState<number>(0);
-
-  const NORMAL_HOURLY_THRESHOLD = 10.0;
 
   useEffect(() => {
     const role = localStorage.getItem('user_role');
@@ -109,7 +109,7 @@ export default function AnalysisPage() {
     setSelectedMeterId(storeId);
     const targetStore = storeAnalysisList.find((m) => m.id === storeId);
     if (targetStore) {
-      applyMetrics(targetStore.hourlyRate, targetStore.monthlyCost);
+      applyMetrics(targetStore.hourlyRate, targetStore.monthlyCost, targetStore.isSpikeDetected, targetStore.spikePercent);
     }
   };
 
@@ -147,7 +147,7 @@ export default function AnalysisPage() {
       const detailedAnalysisList: StoreAnalysisItem[] = [];
       if (currentMeters.length > 0) {
         for (const m of currentMeters) {
-          const { rate, latestKwh } = await calculateRateAndReadingForMeter(m.id);
+          const { rate, latestKwh, isSpikeDetected, spikePercent: calculatedSpikePct } = await calculateRateAndReadingForMeter(m.id);
           const storeTariff = getTariffRate(m.power_va || 1300);
           const storeMonthlyCost = rate * 24 * 30 * storeTariff;
 
@@ -232,6 +232,8 @@ export default function AnalysisPage() {
             latestKwh: latestKwh,
             daysRemaining: daysLeft,
             monthlyCost: storeMonthlyCost,
+            isSpikeDetected,
+            spikePercent: calculatedSpikePct,
             todaySessions: formattedSessions,
             weeklyTrend,
           });
@@ -252,13 +254,13 @@ export default function AnalysisPage() {
       const activeItem = detailedAnalysisList.find((m) => m.id === targetMeterId);
 
       if (activeItem) {
-        applyMetrics(activeItem.hourlyRate, activeItem.monthlyCost);
+        applyMetrics(activeItem.hourlyRate, activeItem.monthlyCost, activeItem.isSpikeDetected, activeItem.spikePercent);
       } else if (targetMeterId) {
         const rateData = await calculateRateAndReadingForMeter(targetMeterId);
         const activeMeter = currentMeters.find((m) => m.id === targetMeterId);
         const tariff = getTariffRate(activeMeter?.power_va || 1300);
         const monthlyCost = rateData.rate * 24 * 30 * tariff;
-        applyMetrics(rateData.rate, monthlyCost);
+        applyMetrics(rateData.rate, monthlyCost, rateData.isSpikeDetected, rateData.spikePercent);
       }
     } catch (err: any) {
       console.error('Gagal mengambil data analisis:', err?.message || err);
@@ -267,9 +269,10 @@ export default function AnalysisPage() {
     }
   };
 
+  // PEMBARUAN LOGIKA: Analisis Anomali Antar-Pindaian Berurutan
   const calculateRateAndReadingForMeter = async (
     meterId: string
-  ): Promise<{ rate: number; latestKwh: number }> => {
+  ): Promise<{ rate: number; latestKwh: number; isSpikeDetected: boolean; spikePercent: number }> => {
     const { data: readings } = await supabase
       .from('meter_readings')
       .select('kwh, meter_value, created_at')
@@ -277,43 +280,57 @@ export default function AnalysisPage() {
       .order('created_at', { ascending: false })
       .limit(3);
 
-    if (!readings || readings.length === 0) return { rate: 0, latestKwh: 0 };
+    if (!readings || readings.length === 0) {
+      return { rate: 0, latestKwh: 0, isSpikeDetected: false, spikePercent: 0 };
+    }
 
-    const latestVal = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
-    if (readings.length < 2) return { rate: 0, latestKwh: latestVal };
+    const val1 = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
+    if (readings.length < 2) {
+      return { rate: 0, latestKwh: val1, isSpikeDetected: false, spikePercent: 0 };
+    }
 
-    const oldestVal = Number(readings[readings.length - 1].meter_value ?? readings[readings.length - 1].kwh ?? 0);
-    const latestTime = new Date(readings[0].created_at).getTime();
-    const oldestTime = new Date(readings[readings.length - 1].created_at).getTime();
+    const val2 = Number(readings[1].meter_value ?? readings[1].kwh ?? 0);
+    const time1 = new Date(readings[0].created_at).getTime();
+    const time2 = new Date(readings[1].created_at).getTime();
+    const hoursLatest = Math.max((time1 - time2) / (1000 * 60 * 60), 0.0083);
 
-    const diffHours = (latestTime - oldestTime) / (1000 * 60 * 60);
+    const consumedLatest = val2 >= val1 ? val2 - val1 : 0;
+    const currentRate = consumedLatest / hoursLatest;
 
-    if (oldestVal >= latestVal && diffHours > 0) {
-      const consumedKwh = oldestVal - latestVal;
-      if (diffHours >= 0.25) {
-        return { rate: consumedKwh / diffHours, latestKwh: latestVal };
-      } else {
-        return { rate: consumedKwh, latestKwh: latestVal };
+    let isSpike = false;
+    let spikePct = 0;
+
+    // Jika ada pindaian ke-3, bandingkan laju pindaian terbaru vs pindaian sebelumnya
+    if (readings.length >= 3) {
+      const val3 = Number(readings[2].meter_value ?? readings[2].kwh ?? 0);
+      const time3 = new Date(readings[2].created_at).getTime();
+      const hoursPrev = Math.max((time2 - time3) / (1000 * 60 * 60), 0.0083);
+
+      const consumedPrev = val3 >= val2 ? val3 - val2 : 0;
+      const prevRate = consumedPrev / hoursPrev;
+
+      if (prevRate > 0 && currentRate > prevRate) {
+        spikePct = Math.round(((currentRate - prevRate) / prevRate) * 100);
+        if (spikePct >= 25) { // Toleransi kenaikan laju 25%
+          isSpike = true;
+        }
       }
     }
 
-    return { rate: 0, latestKwh: latestVal };
+    return {
+      rate: currentRate,
+      latestKwh: val1,
+      isSpikeDetected: isSpike,
+      spikePercent: spikePct,
+    };
   };
 
-  const applyMetrics = (ratePerHour: number, calculatedMonthlyCost: number) => {
+  const applyMetrics = (ratePerHour: number, calculatedMonthlyCost: number, spikeDetected: boolean = false, spikePct: number = 0) => {
     const daily = ratePerHour * 24;
     const monthlyKwh = daily * 30;
 
-    if (ratePerHour > NORMAL_HOURLY_THRESHOLD) {
-      const diffPercent = Math.round(
-        ((ratePerHour - NORMAL_HOURLY_THRESHOLD) / NORMAL_HOURLY_THRESHOLD) * 100
-      );
-      setIsSpike(true);
-      setSpikePercent(diffPercent);
-    } else {
-      setIsSpike(false);
-      setSpikePercent(0);
-    }
+    setIsSpike(spikeDetected);
+    setSpikePercent(spikePct);
 
     setHourlyRate(ratePerHour);
     setDailyAvgKwh(daily);
@@ -661,7 +678,7 @@ export default function AnalysisPage() {
                 </div>
 
                 <p className="text-slate-700 leading-relaxed font-medium">
-                  Pemakaian jam berjalan ({hourlyRate.toFixed(2)} kWh/jam) terdeteksi tinggi!
+                  Laju pindaian terbaru ({hourlyRate.toFixed(2)} kWh/jam) terdeteksi naik tinggi dibanding pindaian sebelumnya!
                 </p>
 
                 <div className="bg-white p-3 rounded-lg border border-rose-200 space-y-2 text-slate-800 font-medium">
