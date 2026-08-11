@@ -74,7 +74,7 @@ export default function ScanPage() {
         }
       } catch (err: any) {
         console.error('Gagal mengambil data toko:', err.message);
-      } font-medium {
+      } finally {
         setIsLoadingMeters(false);
       }
     };
