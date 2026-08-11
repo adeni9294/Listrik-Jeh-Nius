@@ -16,9 +16,8 @@ import {
   LogOut,
   LogIn,
   Lock,
-  Sun,
-  Sunset,
-  Moon,
+  Clock,
+  Activity,
 } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -178,7 +177,8 @@ export default function AiPage() {
             }
           }
 
-          const sessionLabel = idx === 0 ? 'Pindaian 1 (Pagi/Buka)' : idx === 1 ? 'Pindaian 2 (Siang)' : `Pindaian ${idx + 1} (Malam/Tutup)`;
+          // PENYESUAIAN: Penamaan fleksibel berbasis urutan
+          const sessionLabel = `Pindaian #${idx + 1}`;
 
           formattedSessions.push({
             id: r.id,
@@ -301,21 +301,21 @@ export default function AiPage() {
             ? `⚠️ **Peringatan Overload:** Beban alat (${totalWatt} W) melampaui batas aman serentak MCB (${maxSafeWatts} W). Berisiko *trip/jepret* jika dinyalakan bersamaan!` 
             : `✅ **Aman:** Beban masih di bawah batas maksimal MCB.`);
       } 
-      else if (q.includes('sesi') || q.includes('pindaian') || q.includes('pagi') || q.includes('siang') || q.includes('malam')) {
+      else if (q.includes('sesi') || q.includes('pindaian') || q.includes('log') || q.includes('riwayat')) {
         if (todaySessions.length === 0) {
-          response = `📊 **Analisis Pindaian Hari Ini:**\nBelum ada pindaian tersimpan hari ini. Lakukan scan pagi, siang, dan malam agar AI dapat memetakan jam lonjakan energi toko Anda.`;
+          response = `📊 **Analisis Pindaian Hari Ini:**\nBelum ada pindaian tersimpan hari ini. Lakukan pindaian secara berkala agar AI dapat memetakan pemakaian energi toko Anda secara akurat.`;
         } else {
           let sessionText = todaySessions.map((s) => 
-            `• **${s.sessionName}** (${s.time}): ${s.kwh.toFixed(1)} kWh ${s.consumptionFromPrev !== null ? `➔ Terpakai: *${s.consumptionFromPrev.toFixed(1)} kWh*` : ''}`
+            `• **${s.sessionName}** (${s.time} WIB): ${s.kwh.toFixed(1)} kWh ${s.consumptionFromPrev !== null ? `➔ Terpakai: *${s.consumptionFromPrev.toFixed(1)} kWh*` : ''}`
           ).join('\n');
 
-          response = `📊 **Breakdown Pindaian Hari Ini (${storeName}):**\n\n${sessionText}\n\n💡 **AI Insight:** Pastikan pemakaian di sesi siang terpantau ketat karena beban pendingin (AC & Showcase) mencapai puncaknya.`;
+          response = `📊 **Breakdown Pindaian Hari Ini (${storeName}):**\n\n${sessionText}\n\n💡 **AI Insight:** Data konsumsi antar-pindaian siap digunakan untuk menganalisis efisiensi pemakaian harian.`;
         }
       }
       else {
         response = `Saya adalah Asisten AI Kelistrikan Toko (${storeName} - ${activePowerVa} VA).\n\n` +
           `Anda bisa mengetik pertanyaan seperti:\n` +
-          `• *"Bagaimana hasil pindaian sesi hari ini?"*\n` +
+          `• *"Bagaimana hasil pindaian hari ini?"*\n` +
           `• *"Showcase 300 watt 24 jam"* \n` +
           `• *"Berapa watt aman untuk daya ${activePowerVa} VA?"*\n` +
           `• *"Penyebab listrik toko boros tiba-tiba?"*`;
@@ -441,11 +441,13 @@ export default function AiPage() {
               </CardContent>
             </Card>
 
-            {/* PERBANDINGAN PINDAIAN SESI HARI INI */}
+            {/* LOG PINDAIAN HARI INI */}
             <Card className="border-teal-200 bg-teal-50/30 shadow-sm">
               <CardHeader className="pb-2 pt-4 px-5">
                 <CardTitle className="text-xs font-bold text-slate-800 flex items-center justify-between">
-                  <span>📊 Log Pindaian Sesi Hari Ini</span>
+                  <span className="flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-teal-600" /> Log Pindaian Hari Ini
+                  </span>
                   <span className="text-[11px] text-teal-700 font-normal">
                     {todaySessions.length}x Pindaian Sukses
                   </span>
@@ -455,22 +457,18 @@ export default function AiPage() {
                 {todaySessions.length === 0 ? (
                   <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
                 ) : (
-                  todaySessions.map((s, idx) => (
+                  todaySessions.map((s) => (
                     <div
                       key={s.id}
                       className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
                     >
                       <div className="flex items-center gap-2.5">
-                        {idx === 0 ? (
-                          <Sun className="w-4 h-4 text-amber-500" />
-                        ) : idx === 1 ? (
-                          <Sunset className="w-4 h-4 text-orange-500" />
-                        ) : (
-                          <Moon className="w-4 h-4 text-indigo-500" />
-                        )}
+                        <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
+                          <Clock className="w-4 h-4" />
+                        </div>
                         <div>
                           <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
-                          <span className="text-[10px] text-slate-400">Jam {s.time}</span>
+                          <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
                         </div>
                       </div>
 
@@ -597,7 +595,7 @@ export default function AiPage() {
                 <div className="flex gap-2 pt-2">
                   <input
                     type="text"
-                    placeholder="Tanya AI (contoh: 'Bagaimana hasil pindaian sesi hari ini?')..."
+                    placeholder="Tanya AI (contoh: 'Bagaimana hasil pindaian hari ini?')..."
                     value={inputPrompt}
                     onChange={(e) => setInputPrompt(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
