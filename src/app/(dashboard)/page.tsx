@@ -119,12 +119,13 @@ export default function DashboardPage() {
       startOfToday.setHours(0, 0, 0, 0);
 
       for (const m of meters) {
+        // Ambil 10 pindaian terakhir untuk memfilter pindaian yang terlalu dekat
         const { data: readings } = await supabase
           .from('meter_readings')
           .select('id, kwh, meter_value, confidence, created_at')
           .eq('meter_id', m.id)
           .order('created_at', { ascending: false })
-          .limit(3);
+          .limit(10);
 
         const { data: todayReadings } = await supabase
           .from('meter_readings')
@@ -150,7 +151,6 @@ export default function DashboardPage() {
               }
             }
 
-            // PENYESUAIAN: Label berbasis urutan fleksibel (tanpa batasan Pagi/Siang/Malam)
             const sessionLabel = `Pindaian #${idx + 1}`;
 
             formattedSessions.push({
@@ -176,14 +176,28 @@ export default function DashboardPage() {
           avgMeterConfidence = Number(readings[0].confidence || 85);
 
           if (readings.length >= 2) {
-            const latest = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
-            const oldest = Number(readings[readings.length - 1].meter_value ?? readings[readings.length - 1].kwh ?? 0);
+            // PENYESUAIAN SAMAKAN LOGIKA: Filter pindaian yang berjarak minimal 5 menit
+            const validReadings: typeof readings = [readings[0]];
+            for (let i = 1; i < readings.length; i++) {
+              const prevTime = new Date(validReadings[validReadings.length - 1].created_at).getTime();
+              const currTime = new Date(readings[i].created_at).getTime();
+              const diffMinutes = (prevTime - currTime) / (1000 * 60);
 
-            const diffMs = new Date(readings[0].created_at).getTime() - new Date(readings[readings.length - 1].created_at).getTime();
-            intervalHours = diffMs / (1000 * 60 * 60);
+              if (diffMinutes >= 5) {
+                validReadings.push(readings[i]);
+              }
+            }
 
-            if (oldest >= latest && intervalHours >= 0.25) {
-              hourlyRate = (oldest - latest) / intervalHours;
+            if (validReadings.length >= 2) {
+              const latest = Number(validReadings[0].meter_value ?? validReadings[0].kwh ?? 0);
+              const previousValid = Number(validReadings[1].meter_value ?? validReadings[1].kwh ?? 0);
+
+              const diffMs = new Date(validReadings[0].created_at).getTime() - new Date(validReadings[1].created_at).getTime();
+              intervalHours = diffMs / (1000 * 60 * 60);
+
+              if (previousValid >= latest && intervalHours > 0) {
+                hourlyRate = (previousValid - latest) / intervalHours;
+              }
             }
 
             dailyProj = hourlyRate * 24;
