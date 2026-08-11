@@ -27,6 +27,7 @@ import { getTariffRate } from '@/lib/constants';
 interface TodayScanSession {
   id: string;
   time: string;
+  createdAt: string; // TAMBAHAN TIMESTAMP UNTUK MENGHITUNG DURASI
   kwh: number;
   consumptionFromPrev: number | null;
   sessionName: string;
@@ -49,7 +50,6 @@ interface MeterWithReading {
   todaySessions: TodayScanSession[];
 }
 
-// FUNGSI UTAMA: MENGAMBIL NAMA BULAN DEPAN & JUMLAH HARINYA SECARA OTOMATIS
 const getNextMonthInfo = () => {
   const now = new Date();
   const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -60,7 +60,6 @@ const getNextMonthInfo = () => {
   return { monthName, daysInNextMonth };
 };
 
-// HELPER: MENGHITUNG ESTIMASI TANGGAL & WAKTU HABIS TOKEN
 const calculateExpiryDate = (remainingKwh: number, hourlyRate: number) => {
   if (hourlyRate <= 0 || remainingKwh <= 0) return null;
 
@@ -195,6 +194,7 @@ export default function DashboardPage() {
             formattedSessions.push({
               id: r.id,
               time: timeStr,
+              createdAt: r.created_at,
               kwh: val,
               consumptionFromPrev: consumed,
               sessionName: `Pindaian #${idx + 1}`,
@@ -220,7 +220,6 @@ export default function DashboardPage() {
           avgMeterConfidence = Number(readings[0].confidence || 85);
         }
 
-        // PERHITUNGAN LAJU PER JAM (AKUMULASI HARI INI)
         if (todayReadings && todayReadings.length >= 2) {
           const firstTime = new Date(todayReadings[0].created_at).getTime();
           const latestTime = new Date(todayReadings[todayReadings.length - 1].created_at).getTime();
@@ -254,7 +253,6 @@ export default function DashboardPage() {
           }
         }
 
-        // PROYEKSI DINAMIS BERDASARKAN HARI BULAN DEPAN
         const dailyProj = hourlyRate > 0 ? hourlyRate * 24 : actualDailyKwh;
         const weeklyProj = dailyProj * 7;
         const monthlyProjNextMonth = dailyProj * daysInNextMonth;
@@ -367,7 +365,6 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 pb-24 max-w-6xl mx-auto">
-      {/* Header Info */}
       <div className="flex justify-between items-center gap-2">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-800 flex items-center gap-1.5">
@@ -441,11 +438,8 @@ export default function DashboardPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* KOLOM KIRI (2 SPAN DESKTOP) */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* Card Score & Status Scan */}
             <Card className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white shadow-xl border-none">
               <CardContent className="p-6">
                 <div className="flex justify-between items-start">
@@ -482,7 +476,6 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Quick Stats Grid */}
             <div className="grid grid-cols-2 gap-4">
               <Card className="bg-slate-50 border-slate-200">
                 <CardContent className="p-5">
@@ -515,7 +508,6 @@ export default function DashboardPage() {
               </Card>
             </div>
 
-            {/* Selector Toko */}
             {metersData.length > 0 && (
               <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
                 <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
@@ -538,7 +530,6 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Breakdown Toko */}
             <div className="space-y-4">
               {filteredMeters.map((m) => {
                 const storeTariff = getTariffRate(m.power_va);
@@ -559,7 +550,6 @@ export default function DashboardPage() {
                         </span>
                       </div>
 
-                      {/* TAMPILAN KONSUMSI REALTIME */}
                       <div className="grid grid-cols-3 gap-3 text-xs">
                         <div className="bg-slate-50 p-3 rounded-xl">
                           <span className="text-slate-500 block text-[11px] font-medium">Sisa Meteran</span>
@@ -591,7 +581,6 @@ export default function DashboardPage() {
                         </div>
                       </div>
 
-                      {/* BLOK DATA ESTIMASI PROYEKSI (DINAMIS BULAN DEPAN) */}
                       <div className="bg-slate-100/80 p-3.5 rounded-xl space-y-2">
                         <span className="text-[11px] font-bold text-slate-600 block uppercase tracking-wider text-center sm:text-left">
                           Data Estimasi Proyeksi
@@ -623,10 +612,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* KOLOM KANAN (DESKTOP SIDEBAR 1 SPAN) */}
           <div className="space-y-6">
             
-            {/* RIWAYAT PINDAIAN HARI INI */}
+            {/* RIWAYAT PINDAIAN HARI INI DENGAN RATA-RATA PER JAM */}
             {filteredMeters.map((m) => (
               <Card key={`sessions-${m.id}`} className="border-teal-200 bg-teal-50/30 shadow-sm">
                 <CardHeader className="pb-2 pt-4 px-5">
@@ -643,37 +631,55 @@ export default function DashboardPage() {
                   {m.todaySessions.length === 0 ? (
                     <p className="text-xs text-slate-400 italic">Belum ada pindaian tersimpan hari ini.</p>
                   ) : (
-                    m.todaySessions.map((s) => (
-                      <div
-                        key={s.id}
-                        className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
-                            <Clock className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
-                            <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
-                          </div>
-                        </div>
+                    m.todaySessions.map((s, idx, arr) => {
+                      let sessionHourlyRate = 0;
+                      if (idx > 0 && s.consumptionFromPrev !== null && s.consumptionFromPrev > 0) {
+                        const prevTime = new Date(arr[idx - 1].createdAt).getTime();
+                        const currTime = new Date(s.createdAt).getTime();
+                        const diffHours = (currTime - prevTime) / (1000 * 60 * 60);
+                        if (diffHours > 0) {
+                          sessionHourlyRate = s.consumptionFromPrev / diffHours;
+                        }
+                      }
 
-                        <div className="text-right">
-                          <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
-                          {s.consumptionFromPrev !== null && (
-                            <span className="text-[10px] text-rose-600 font-bold block">
-                              Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
-                            </span>
-                          )}
+                      return (
+                        <div
+                          key={s.id}
+                          className="bg-white p-3 rounded-xl border border-slate-200 flex justify-between items-center text-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-1.5 bg-teal-50 text-teal-700 rounded-lg">
+                              <Clock className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-800 block text-xs">{s.sessionName}</span>
+                              <span className="text-[10px] text-slate-400">Jam {s.time} WIB</span>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="font-extrabold text-slate-800 block">{s.kwh.toFixed(1)} kWh</span>
+                            {s.consumptionFromPrev !== null && (
+                              <>
+                                <span className="text-[10px] text-rose-600 font-bold block">
+                                  Terpakai: {s.consumptionFromPrev.toFixed(1)} kWh
+                                </span>
+                                {sessionHourlyRate > 0 && (
+                                  <span className="text-[9px] text-slate-500 font-mono block">
+                                    (~{sessionHourlyRate.toFixed(2)} kWh/jam)
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </CardContent>
               </Card>
             ))}
 
-            {/* AI Energy Insight - PREDIKSI TANGGAL & WAKTU HABIS */}
             <Card className="border-teal-200 bg-teal-50/50 shadow-sm">
               <CardHeader className="p-5 pb-2 flex flex-row items-center space-x-2">
                 <Cpu className="w-5 h-5 text-teal-700" />
@@ -708,7 +714,6 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
 
-            {/* Action Button Scan */}
             <div>
               <Link href="/scan">
                 <Button className="w-full bg-teal-700 hover:bg-teal-800 text-white font-bold py-6 rounded-xl shadow-lg flex items-center justify-center space-x-2 text-sm">
