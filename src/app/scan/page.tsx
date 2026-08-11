@@ -74,7 +74,7 @@ export default function ScanPage() {
         }
       } catch (err: any) {
         console.error('Gagal mengambil data toko:', err.message);
-      } finally {
+      } font-medium {
         setIsLoadingMeters(false);
       }
     };
@@ -219,7 +219,7 @@ export default function ScanPage() {
         status: 'success',
         image_url: uploadedImageUrl,
         reading_date: now.toISOString().slice(0, 10),
-        reading_time: now.toTimeString().split(' ')[0],
+        reading_time: now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
         created_at: now.toISOString(),
       };
 
@@ -231,7 +231,7 @@ export default function ScanPage() {
 
       if (insertError) throw insertError;
 
-      alert(`Tersimpan: ${insertedRow.kwh} kWh`);
+      alert(`Berhasil tersimpan: ${insertedRow.kwh} kWh`);
       window.location.href = '/';
     } catch (err: any) {
       console.error('Gagal menyimpan ke Supabase:', err);
