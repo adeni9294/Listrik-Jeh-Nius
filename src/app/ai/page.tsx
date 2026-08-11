@@ -70,6 +70,7 @@ export default function AiPage() {
     },
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
+  const [isAiThinking, setIsAiThinking] = useState(false);
 
   useEffect(() => {
     const storedStoreId = localStorage.getItem('active_store_id');
@@ -129,6 +130,8 @@ export default function AiPage() {
       if (selectedMeterId === 'all') {
         if (currentRole !== 'admin' && currentStoreId) {
           targetMeterId = currentStoreId;
+        } else if (currentMeters.length > 0) {
+          targetMeterId = currentMeters[0].id;
         } else {
           const { data: firstMeter } = await supabase.from('meters').select('id').limit(1).single();
           targetMeterId = firstMeter?.id || '';
@@ -147,16 +150,10 @@ export default function AiPage() {
       const currentTariffRate = getTariffRate(powerVa);
       setActiveTariff(currentTariffRate);
 
-      const { data: readings } = await supabase
-        .from('meter_readings')
-        .select('kwh, meter_value, created_at')
-        .eq('meter_id', targetMeterId)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
+      // AMBIL READINGS HARI INI
       const { data: todayReadings } = await supabase
         .from('meter_readings')
         .select('id, kwh, meter_value, created_at')
@@ -164,7 +161,24 @@ export default function AiPage() {
         .gte('created_at', startOfToday.toISOString())
         .order('created_at', { ascending: true });
 
+      // AMBIL READINGS TERBARU SECARA UMUM
+      const { data: readings } = await supabase
+        .from('meter_readings')
+        .select('kwh, meter_value, created_at')
+        .eq('meter_id', targetMeterId)
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      let latestReading = 0;
+      if (readings && readings.length > 0) {
+        latestReading = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
+        setCurrentKwh(latestReading);
+      }
+
       const formattedSessions: TodayScanSession[] = [];
+      let actualDailyKwh = 0;
+      let accumulatedHourlyRate = 0;
+
       if (todayReadings && todayReadings.length > 0) {
         todayReadings.forEach((r, idx) => {
           const val = Number(r.meter_value ?? r.kwh ?? 0);
@@ -186,42 +200,62 @@ export default function AiPage() {
             sessionName: `Pindaian #${idx + 1}`,
           });
         });
-      }
-      setTodaySessions(formattedSessions);
 
-      if (readings && readings.length > 0) {
-        const latestReading = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
-        setCurrentKwh(latestReading);
+        // KALKULASI PERSIS SEPERTI DASHBOARD & ANALISIS
+        if (todayReadings.length >= 2) {
+          const firstValToday = Number(todayReadings[0].meter_value ?? todayReadings[0].kwh ?? 0);
+          const latestValToday = Number(todayReadings[todayReadings.length - 1].meter_value ?? todayReadings[todayReadings.length - 1].kwh ?? 0);
+          if (firstValToday >= latestValToday) {
+            actualDailyKwh = firstValToday - latestValToday;
+          }
 
-        if (readings.length >= 2) {
-          const oldestReading = Number(readings[readings.length - 1].meter_value ?? readings[readings.length - 1].kwh ?? 0);
-          const t1 = new Date(readings[0].created_at).getTime();
-          const t2 = new Date(readings[readings.length - 1].created_at).getTime();
-          const diffHours = Math.max((t1 - t2) / (1000 * 60 * 60), 0.01);
+          const firstTime = new Date(todayReadings[0].created_at).getTime();
+          const latestTime = new Date(todayReadings[todayReadings.length - 1].created_at).getTime();
+          const totalHoursToday = (latestTime - firstTime) / (1000 * 60 * 60);
 
-          if (oldestReading >= latestReading && diffHours > 0) {
-            const consumed = oldestReading - latestReading;
-            const ratePerHour = diffHours >= 0.25 ? consumed / diffHours : consumed;
-            const calculatedDaily = ratePerHour * 24;
-
-            setHourlyKwh(ratePerHour);
-            setDailyKwh(calculatedDaily);
-
-            if (calculatedDaily > 0) {
-              const daysLeft = latestReading / calculatedDaily;
-              setDaysRemaining(Number(daysLeft.toFixed(1)));
-
-              if (daysLeft < 2) {
-                setHealthStatus('critical');
-              } else if (ratePerHour > 15) {
-                setHealthStatus('warning');
-              } else {
-                setHealthStatus('normal');
-              }
-            }
+          if (totalHoursToday > 0 && actualDailyKwh > 0) {
+            accumulatedHourlyRate = actualDailyKwh / totalHoursToday;
           }
         }
       }
+
+      // KALKULASI FALLBACK JIKA DATA HARI INI KURANG
+      let fallbackHourlyRate = 0;
+      if (accumulatedHourlyRate === 0 && readings && readings.length >= 2) {
+        const val1 = Number(readings[0].meter_value ?? readings[0].kwh ?? 0);
+        const val2 = Number(readings[1].meter_value ?? readings[1].kwh ?? 0);
+        const t1 = new Date(readings[0].created_at).getTime();
+        const t2 = new Date(readings[1].created_at).getTime();
+        const diffHours = (t1 - t2) / (1000 * 60 * 60);
+
+        if (val2 >= val1 && diffHours > 0) {
+          fallbackHourlyRate = (val2 - val1) / diffHours;
+        }
+      }
+
+      const finalHourlyRate = accumulatedHourlyRate > 0 ? accumulatedHourlyRate : fallbackHourlyRate;
+      const dailyProj = finalHourlyRate > 0 ? finalHourlyRate * 24 : actualDailyKwh;
+
+      setHourlyKwh(finalHourlyRate);
+      setDailyKwh(dailyProj);
+      setTodaySessions(formattedSessions);
+
+      if (dailyProj > 0) {
+        const daysLeft = latestReading / dailyProj;
+        setDaysRemaining(Number(daysLeft.toFixed(1)));
+
+        if (daysLeft < 2) {
+          setHealthStatus('critical');
+        } else if (finalHourlyRate > 15) {
+          setHealthStatus('warning');
+        } else {
+          setHealthStatus('normal');
+        }
+      } else {
+        setDaysRemaining(0);
+        setHealthStatus('normal');
+      }
+
     } catch (err: any) {
       console.error('Gagal memproses AI insight:', err?.message || err);
     } finally {
@@ -260,15 +294,17 @@ export default function AiPage() {
   });
 
   const handleSendMessage = async () => {
-    if (!inputPrompt.trim()) return;
+    if (!inputPrompt.trim() || isAiThinking) return;
 
     const userText = inputPrompt;
     setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
     setInputPrompt('');
+    setIsAiThinking(true);
+
+    const activeStoreObj = meters.find((m) => m.id === selectedMeterId) || meters[0];
+    const activeStoreName = activeStoreObj?.store_name || 'Toko Ini';
 
     try {
-      const activeStoreName = meters.find((m) => m.id === selectedMeterId)?.store_name || 'Toko Ini';
-      
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -290,19 +326,19 @@ export default function AiPage() {
       if (res.ok) {
         const data = await res.json();
         setMessages((prev) => [...prev, { sender: 'ai', text: data.reply }]);
+        setIsAiThinking(false);
         return;
       }
     } catch (e) {
-      console.warn('API Chatbot offline, menggunakan mode AI fallback lokal:', e);
+      console.warn('API Chatbot offline, menggunakan mode AI fallback cerdas:', e);
     }
 
-    // Fallback Lokal jika API Offline
+    // Fallback Lokal Cerdas jika API Offline / Belum Dikonfigurasi
     setTimeout(() => {
       const q = userText.toLowerCase();
       let response = '';
 
       const maxSafeWatts = Math.round(activePowerVa * 0.8);
-      const storeName = meters.find((m) => m.id === selectedMeterId)?.store_name || 'Toko Ini';
 
       const wattMatch = q.match(/(\d+)\s*(watt|w\b)/);
       const hourMatch = q.match(/(\d+)\s*(jam|hours|h\b)/);
@@ -312,14 +348,39 @@ export default function AiPage() {
       const detectedHours = hourMatch ? parseInt(hourMatch[1]) : 24;
       const detectedQty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
 
-      if (detectedWatt) {
+      // 1. DETEKSI PERTANYAAN PILIHAN HARGA / TARIF / TOKEN PER KWH
+      if (q.includes('harga') || q.includes('tarif') || q.includes('kwh') || q.includes('berapa')) {
+        response = `⚡ **Informasi Tarif Listrik PLN (${activeStoreName}):**\n\n` +
+          `• **Daya Terpasang:** ${activePowerVa} VA\n` +
+          `• **Tariff Rate PLN:** ~Rp ${Math.round(activeTariff).toLocaleString('id-ID')} / kWh\n\n` +
+          `💡 *Setiap pembelian token sebesar Rp 100.000 akan mendapatkan sekitar **${(100000 / activeTariff).toFixed(1)} kWh**.*`;
+      }
+      // 2. DETEKSI PERTANYAAN SISA TOKEN / ESTIMASI HABIS
+      else if (q.includes('sisa') || q.includes('habis') || q.includes('saran') || q.includes('token')) {
+        response = `🔋 **Status Sisa Token (${activeStoreName}):**\n\n` +
+          `• **Sisa Token:** ${currentKwh.toFixed(1)} kWh\n` +
+          `• **Laju Konsumsi:** ${hourlyKwh.toFixed(2)} kWh/jam (${dailyKwh.toFixed(1)} kWh/hari)\n` +
+          `• **Estimasi Bertahan:** ~**${daysRemaining} Hari** lagi\n\n` +
+          `📅 Diprediksi akan habis pada tanggal **${formattedExpiryDate}**.`;
+      }
+      // 3. DETEKSI PERTANYAAN PINDAIAN / HASIL LOG HARI INI
+      else if (q.includes('pindaian') || q.includes('scan') || q.includes('hari ini') || q.includes('log')) {
+        response = `📊 **Log Pindaian Hari Ini (${activeStoreName}):**\n\n` +
+          `• **Total Pindaian:** ${todaySessions.length}x Sukses\n` +
+          `• **Laju Rata-Rata:** ${hourlyKwh.toFixed(2)} kWh/jam\n` +
+          (todaySessions.length > 0 
+            ? `• **Pindaian Terakhir:** ${todaySessions[todaySessions.length - 1].kwh.toFixed(1)} kWh (Jam ${todaySessions[todaySessions.length - 1].time} WIB)`
+            : `• *Belum ada data pindaian tersimpan hari ini.*`);
+      }
+      // 4. DETEKSI KALKULASI WATT ELEKTRONIK
+      else if (detectedWatt) {
         const totalWatt = detectedWatt * detectedQty;
         const dailyKwhCalc = (totalWatt * detectedHours) / 1000;
         const monthlyKwhCalc = dailyKwhCalc * 30;
         const dailyCost = dailyKwhCalc * activeTariff;
         const monthlyCost = monthlyKwhCalc * activeTariff;
 
-        response = `⚡ **Analisis Kelistrikan Peralatan (${storeName}):**\n\n` +
+        response = `⚡ **Analisis Kelistrikan Peralatan (${activeStoreName}):**\n\n` +
           `• **Total Beban:** ${detectedQty}x ${detectedWatt} W = **${totalWatt} Watt**\n` +
           `• **Konsumsi Alat:** ${dailyKwhCalc.toFixed(2)} kWh/hari (~Rp ${Math.round(dailyCost).toLocaleString('id-ID')}/hari)\n` +
           `• **Proyeksi Bulanan:** ${monthlyKwhCalc.toFixed(1)} kWh (~Rp ${Math.round(monthlyCost).toLocaleString('id-ID')}/bulan)\n\n` +
@@ -329,15 +390,18 @@ export default function AiPage() {
             ? `⚠️ **Peringatan Overload:** Beban alat (${totalWatt} W) melampaui batas aman MCB (${maxSafeWatts} W).` 
             : `✅ **Aman:** Beban di bawah kapasitas maksimal MCB.`);
       } 
+      // 5. RESPONS CHAT UMUM
       else {
-        response = `Saya adalah Asisten AI Kelistrikan Toko (${storeName} - ${activePowerVa} VA).\n\n` +
-          `Saya dapat memberikan saran seputar:\n` +
-          `1. Analisis pemakaian alat elektronik toko.\n` +
-          `2. Tips hemat energi & pencegahan kebocoran arus.\n` +
-          `3. Pengetahuan teknologi energi global.`;
+        response = `Saya adalah Asisten AI Kelistrikan Toko (${activeStoreName} - ${activePowerVa} VA).\n\n` +
+          `Saya dapat memberikan informasi seputar:\n` +
+          `1. **Harga & Tarif PLN:** Ketik *"harga token per kwh"*.\n` +
+          `2. **Sisa & Estimasi Token:** Ketik *"sisa token hari ini"*.\n` +
+          `3. **Analisis Daya Alat:** Ketik *"AC 1 PK 800 Watt dinyalakan 12 jam"*.\n` +
+          `4. **Tips Hemat Energi:** Pencegahan lonjakan & efisiensi operasional.`;
       }
 
       setMessages((prev) => [...prev, { sender: 'ai', text: response }]);
+      setIsAiThinking(false);
     }, 500);
   };
 
@@ -629,12 +693,20 @@ export default function AiPage() {
                       </div>
                     </div>
                   ))}
+                  {isAiThinking && (
+                    <div className="flex justify-start">
+                      <div className="bg-white border border-slate-200 text-slate-500 p-3 rounded-2xl rounded-bl-none text-xs italic flex items-center gap-2 shadow-xs">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                        <span>Asisten AI sedang berpikir...</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2 pt-2">
                   <input
                     type="text"
-                    placeholder="Tanya AI (contoh: 'AC 1 PK berapa watt?' atau 'Hasil pindaian hari ini')..."
+                    placeholder="Tanya AI (contoh: 'AC 1 PK berapa watt?' atau 'Harga token per kwh nya berapa')..."
                     value={inputPrompt}
                     onChange={(e) => setInputPrompt(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
@@ -644,6 +716,7 @@ export default function AiPage() {
                     size="sm"
                     className="bg-teal-700 hover:bg-teal-800 text-white px-5 rounded-xl h-auto"
                     onClick={handleSendMessage}
+                    disabled={isAiThinking}
                   >
                     <Send className="w-4 h-4" />
                   </Button>
