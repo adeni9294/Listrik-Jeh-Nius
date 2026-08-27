@@ -4,7 +4,7 @@ import '@/app/globals.css';
 import { BottomNav } from '@/components/layout/bottom-nav';
 
 export const metadata: Metadata = {
-  title: 'Listrik Jeh-nius - AI Energy Assistant',
+  title: 'Listrik Jeh_nius - AI Energy Assistant',
   description: 'Asisten Pintar Pembacaan dan Prediksi Token Listrik PLN berbasis AI',
   manifest: '/manifest.json',
   icons: {
