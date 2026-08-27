@@ -1,6 +1,6 @@
-# ⚡ Listrik Jenius - PWA Energy Assistant
+# ⚡ Listrik Jeh-nius - PWA Energy Assistant
 
-**Listrik Jenius** adalah Progressive Web Application (PWA) berbasis AI & OCR *offline-first* yang dirancang khusus untuk membantu pengguna listrik prabayar PLN mengontrol, memprediksi, dan mengoptimalkan penggunaan kWh harian.
+**Listrik Jeh-nius** adalah Progressive Web Application (PWA) berbasis AI & OCR *offline-first* yang dirancang khusus untuk membantu pengguna listrik prabayar PLN mengontrol, memprediksi, dan mengoptimalkan penggunaan kWh harian.
 
 ## 🚀 Fitur Utama
 - 📸 **AI Vision & OCR Scanner:** Pembacaan meteran listrik otomatis dari foto menggunakan Tesseract.js & AI Validation Engine.
